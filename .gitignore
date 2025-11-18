@@ -416,3 +416,20 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+
+# ignoring data/knits/figs
+01_data/*
+!01_data/README.txt
+
+!01_data/Excel
+01_data/Excel/*
+!01_data/Excel/README.txt
+
+02_knits/*
+!02_knits/README.txt
+
+03_seurat_objects/*
+04_figs/*
+!04_figs/README.txt
+DoubletFinder.rmd
