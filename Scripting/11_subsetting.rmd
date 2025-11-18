@@ -1,6 +1,6 @@
 
 ---
-title: "Subsetting further"
+title: "Subsetting furthergit"
 author: "Ivo Borkus"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
