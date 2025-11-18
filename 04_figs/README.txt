@@ -1,0 +1,1 @@
+# Directory containing all graphical output made in scripts

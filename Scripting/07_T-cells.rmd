@@ -1,0 +1,289 @@
+
+---
+title: "Processing seurat object"
+author: "Ivo Borkus"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = T, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 10, fig.height = 10
+)
+knitr::render_markdown()
+```
+
+```{css, echo = F}
+pre code, pre, code {
+  white-space: pre !important;
+  overflow-x: scroll !important;
+  word-break: keep-all !important;
+  word-wrap: initial !important;
+}
+
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+```
+
+
+```{r loading libraries, include = FALSE}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(here)
+library(tidyr)
+library(patchwork)
+library(UCell)
+library(qs2)
+source(here("Brain-Met_V2/functions.R"))
+# source(here("External_data/Fastq_processing/metadata_functions.R"))
+```
+
+# Setting paths and names
+
+Here we set the variables necessary to run my custom scripts. The rest of the script therefore should not be tweaked. 
+
+However, as there is an interpretation stage, all code after Results is custom for each object.
+```{r}
+exc_path <- here("Glioma_Project/01_data/Excel")
+rmd_path <- here("Glioma_Project/02_knits/figs")
+obj_path <- here("Glioma_Project/01_data")
+fig_path <- here("Glioma_Project/04_figs")
+
+object_name <- "Harmony"
+reduction_name <- "T_cells_harmony_1000"
+Processed_name <- "T_cells_harmony_1000"
+sample_col <- "sample_name"
+batch_cols <- c(
+  "tumour_full", "tumour_abbreviated", "grade", "Cell_Type", "Cell_Subtype", "sample_name", "IDH_status",
+  "FACS_sorting", "tier_correct", "cell_het_paper_id", "storage_condition", "prior_treatment", "gender", "Tumour_Margin",
+  "Primary_or_Recurrent", "Previous_Surgery", "Radiotherapy", "Chemotherapy", "MGMT_Methylation"
+)
+continous_cols <- c("nCount_RNA", "nFeature_RNA", "percent.mt", "age_at_surgery_correct", "nuclear_fraction")
+
+
+# subsetting <- c("Cell_Type", c("Myeloid", "Dendritic cells", "Mast cells")) #  Subset-col, cells_of_interest
+subsetting <- c("Ann_lvl_1", c("T-cells", "Tregs", "T_Prolif")) #  Subset-col, cells_of_interest
+
+norm_meth_scale <- c(F, "LogNormalize", 10000) # Perform log normalisatin, method, scale
+vf <- c("vst", 1000, FALSE, FALSE) # VF method, amount, use old vf method, silence VDJgenes using scRep
+scaling <- TRUE #
+var.to.regress <- NULL # supply the var to be regressed if valid
+harmony <- T # Run harmony or not
+n_PCS <- 50 # Amount of Pcs to include
+clustering <- c(TRUE, 4) # Perform clustering, Algorithm
+sub_dir <- NULL
+feature_vec_chosen <- feature_vec_overall
+```
+
+# Read in the object that is to be processed
+```{r read}
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(object_name, ".qs2")), here(obj_path, paste0(object_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+```
+
+# Processing object
+
+```{r processing seurat, eval = F, message = F, include = T}
+# Requires a joined seurat object of v5. Code bellow can be used to do this
+# seurat_obj <- UpdateSeuratObject(seurat_obj)
+# seurat_obj <- scCustomize::Convert_Assay(seurat_object = seurat_obj, convert_to = "V5")
+# seurat_obj <- JoinLayers(seurat_obj)
+seurat_obj <- .processing(
+  obj = seurat_obj,
+  reduction_name = reduction_name,
+  Processed_name = Processed_name,
+  subsetting = subsetting,
+  norm_meth_scale = norm_meth_scale,
+  vf = vf,
+  scaling = scaling,
+  var.to.regress = var.to.regress,
+  harmony = harmony,
+  n_PCS = n_PCS,
+  clustering = clustering
+)
+```
+
+# Loading of processed seurat
+
+```{R loading seurat}
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+```
+
+```{r, eval = harmony, echo = harmony}
+reduction_pca <- paste0("harmony_pca.", reduction_name)
+reduction_umap <- paste0("umap.harmony.", reduction_name)
+emb <- seurat_obj[[reduction_pca]]@cell.embeddings # 212005 × 200
+variance <- apply(emb, 2, var)
+pct <- variance / sum(variance) * 100
+```
+
+# Results
+
+```{r,eval = F}
+plots <- .Running_plots(seurat_obj,
+  reduction_name = reduction_name, output_dir = fig_path,
+  harmony = harmony, umap_feature_vec = feature_vec_chosen, batch_cols = batch_cols
+)
+```
+
+
+```{r}
+resolution_columns <- grep("^RNA_snn_res\\.",
+  colnames(seurat_obj@meta.data),
+  value = TRUE
+)
+
+.seurat_dimplot(seurat_obj, reduction = reduction_umap, group = resolution_columns, label = TRUE) & NoLegend()
+.seurat_dimplot(seurat_obj, reduction = reduction_umap, group = "Sample", label = F)
+.seurat_dimplot(seurat_obj, reduction = reduction_umap, group = "Ann_lvl_1", label = TRUE) & NoLegend()
+FeaturePlot(seurat_obj, features = feature_vec_T[1:8], reduction = reduction_umap) & NoAxes()
+FeaturePlot(seurat_obj, features = feature_vec_T[9:16], reduction = reduction_umap) & NoAxes()
+
+confounders <- c("nFeature_RNA", "nCount_RNA", "percent_mt")
+# seurat_obj$logfeat <- log(seurat_obj$nFeature_RNA)
+# seurat_obj$logcount <- log(seurat_obj$nCount_RNA)
+# seurat_obj$logmt <- log(seurat_obj$percent_mt + 1)
+
+
+VlnPlot(seurat_obj, features = confounders, log = T)
+# FeaturePlot(seurat_obj, features = confounders, reduction = reduction_umap) & NoAxes()
+# FeaturePlot(seurat_obj, features = c("logfeat", "logcount","logmt"), reduction = reduction_umap) & NoAxes()
+
+# FeaturePlot(seurat_obj, features = c("CD3D", "CD3E", "TRAV1-2", "TRAJ33", "TRAJ20", "TRBV28", "TRBV20-1", "TRBV6"), reduction = reduction_umap) & NoAxes() # MAIT
+# FeaturePlot(seurat_obj, features = c("CD3D", "CD3E", "TRAV36", "TRAJ33", "TRAJ34", "TRAJ37", "TRBV28", "TRBJ2-5", "PLZF"), reduction = reduction_umap) & NoAxes() # MAIT unconventional
+
+# FeaturePlot(seurat_obj, features = c("CD3D", "CD3E", "TRAV10", "TRAJ18", "TRAJ12", "TRBV25-1"), reduction = reduction_umap) & NoAxes() # NKT
+
+FeaturePlot(seurat_obj, features = c("TNFSF9", "TNFRSF9"), reduction = reduction_umap) & NoAxes()
+# plot <- FeaturePlot(seurat_obj, features = c("CD3D", "CD3E", "TRGC1", "TRGC2", "TRDC", "CD8A", "CD8B", "CD4", "KLRB1", "ZNF145"), reduction = reduction_umap) & NoAxes()
+
+# plot_2 <- DimPlot(seurat_obj, reduction = reduction_umap, group.by = resolution, label = T) & NoLegend() & NoAxes()
+# plot + plot_2
+# ggsave(here(fig_path, paste0("MAIT", "_", reduction_name, ".png")))
+```
+
+
+
+
+```{r testing code, eval = T}
+library(writexl)
+resolution <- "RNA_snn_res.0.7"
+
+Idents(seurat_obj) <- resolution
+DimPlot(seurat_obj, reduction = reduction_umap, group.by = resolution, label = T) & NoLegend() & NoAxes()
+# ggsave(here(fig_path, paste0(resolution, "_", reduction_name, "_Dimplot.png")))
+DimPlot(seurat_obj, reduction = reduction_umap, group.by = "Ann_lvl_1", label = T) & NoLegend() & NoAxes()
+
+# ggsave(here(fig_path, paste0("Ann_lvl_1", "_", reduction_name, "_Dimplot.png")))
+marker_list <- FindAllMarkers(
+  object = seurat_obj,
+  only.pos = F,
+  min.pct = 0.25,
+  logfc.threshold = 0.25
+)
+table(Idents(seurat_obj)) # Extract rough proportions.
+.excel_sheet(marker_list, exc_path, paste0(reduction_name, "_", resolution)) # This just puts them into an excel sheet :)
+```
+
+## The top 5 DEX markers for each cluster
+
+```{r}
+top5_wide <- marker_list %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), p_val_adj, .by_group = TRUE) %>%
+  slice_head(n = 5) %>%
+  select(cluster, gene) %>%
+  pivot_wider(names_from = cluster, values_from = gene)
+```
+
+## adding details of the cluster IDs
+
+```{r adding details of the cluster IDs, eval = T}
+new.cluster.ids <- c("CD8+_TNFSF9", "CD8+_Cytotoxic", "Tregs", "Bad-quality", "CD4+ Tfh", "MAIT-cells", "CD4+ cm", "T_Prolif", "CD8+ Eff-Exh", "NK", "T-IFN", "Bad-quality")
+colnames(top5_wide) <- make.unique(new.cluster.ids)
+
+# new.cluster.ids %>% length()
+Idents(seurat_obj) <- resolution
+names(new.cluster.ids) <- levels(seurat_obj)
+seurat_obj <- RenameIdents(seurat_obj, new.cluster.ids)
+seurat_obj[["Ann_lvl_2T"]] <- Idents(seurat_obj)
+DimPlot(seurat_obj, reduction = reduction_umap, group.by = "Ann_lvl_2T", label = T) & NoAxes()
+## Saving the annotations in the same processed object
+qs_save(seurat_obj, seurat_obj_path)
+```
+
+```{r, extra analysis, eval = T}
+library(hdWGCNA)
+
+reference_path <- "/scratch_isilon/groups/singlecell/iborkus/Projects/brain_met/03_processing/101_processing_exernal/data/optimising_hdWGCNA/Inhous_hvf_5000_nnp_25_max_shared_10_seurat_processed_final.rds"
+seurat_obj_wgcna <- readRDS(file = reference_path)
+# set as active assay if wgcna_name is not given
+wgcna_name <- NULL
+if (is.null(wgcna_name)) {
+  wgcna_name <- seurat_obj_wgcna@misc$active_wgcna
+}
+CheckWGCNAName(seurat_obj_wgcna, wgcna_name)
+
+# get modules:
+modules <- GetModules(seurat_obj_wgcna, wgcna_name)
+mods <- levels(modules$module)
+mods <- mods[mods != "grey"]
+n_genes <- 25
+# use all genes in the module?
+if (n_genes == "all") {
+  gene_list <- lapply(mods, function(cur_mod) {
+    subset(modules, module == cur_mod) %>% .$gene_name
+  })
+} else {
+  gene_list <- lapply(mods, function(cur_mod) {
+    cur <- subset(modules, module == cur_mod)
+    cur[, c("gene_name", paste0("kME_", cur_mod))] %>%
+      top_n(n_genes) %>%
+      .$gene_name
+  })
+}
+names(gene_list) <- mods
+seurat_obj <- UCell::AddModuleScore_UCell(
+  seurat_obj,
+  features = gene_list
+)
+```
+
+# BMX-Rad evaluation
+
+```{r , eval = T}
+FeaturePlot(seurat_obj, features = paste0(names(gene_list)[1:3], "_UCell"), reduction = reduction_umap) & NoAxes()
+FeaturePlot(seurat_obj, features = paste0(names(gene_list)[4:6], "_UCell"), reduction = reduction_umap) & NoAxes()
+dittoSeq::dittoDimPlot(seurat_obj, reduction.use = reduction_umap, var = "Ann_lvl_2T", do.label = T) & NoAxes()
+Idents(seurat_obj) <- "Ann_lvl_2T"
+VlnPlot(seurat_obj, features = paste0(names(gene_list)[4:6], "_UCell"))
+VlnPlot(seurat_obj, features = paste0(names(gene_list)[1:3], "_UCell"))
+seurat_obj$Ann_lvl_2T %>% table()
+```
+
+
+
+
+```{r show the table}
+gt::gt(top5_wide) %>%
+  gt::tab_header(
+    title = "Top 5 Marker Genes per Cluster"
+  )
+```
+
+
+```{r}
+sessionInfo()
+```

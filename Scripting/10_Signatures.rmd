@@ -1,0 +1,375 @@
+
+---
+title: "Signatures object"
+author: "Ivo Borkus"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = T, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 10, fig.height = 10
+)
+knitr::render_markdown()
+```
+
+```{css, echo = F}
+pre code, pre, code {
+  white-space: pre !important;
+  overflow-x: scroll !important;
+  word-break: keep-all !important;
+  word-wrap: initial !important;
+}
+
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+```
+
+
+```{r loading libraries, include = FALSE}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(here)
+library(tidyr)
+library(patchwork)
+library(UCell)
+library(qs2)
+source(here("Brain-Met_V2/functions.R"))
+# source(here("External_data/Fastq_processing/metadata_functions.R"))
+```
+
+# Setting paths and names
+
+Here we set the variables necessary to run my custom scripts. The rest of the script therefore should not be tweaked. 
+
+However, as there is an interpretation stage, all code after Results is custom for each object.
+```{r}
+exc_path <- here("Glioma_Project/01_data/Excel")
+rmd_path <- here("Glioma_Project/02_knits/figs")
+obj_path <- here("Glioma_Project/01_data")
+fig_path <- here("Glioma_Project/04_figs")
+
+object_name <- "Processed"
+reduction_name <- "Inhouse_Harmony"
+Processed_name <- "Harmony"
+sample_col <- "sample_name"
+batch_cols <- c(
+  "tumour_full", "tumour_abbreviated", "grade", "Cell_Type", "Cell_Subtype", "sample_name", "IDH_status",
+  "FACS_sorting", "tier_correct", "cell_het_paper_id", "storage_condition", "prior_treatment", "gender", "Tumour_Margin",
+  "Primary_or_Recurrent", "Previous_Surgery", "Radiotherapy", "Chemotherapy", "MGMT_Methylation"
+)
+continous_cols <- c("nCount_RNA", "nFeature_RNA", "percent.mt", "age_at_surgery_correct", "nuclear_fraction")
+
+
+# subsetting <- c("Cell_Type", c("Myeloid", "Dendritic cells", "Mast cells")) #  Subset-col, cells_of_interest
+subsetting <- c(NULL, NULL) #  Subset-col, cells_of_interest
+
+norm_meth_scale <- c(TRUE, "LogNormalize", 10000) # Perform log normalisatin, method, scale
+vf <- c("vst", 2000, FALSE, FALSE) # VF method, amount, use old vf method, silence VDJgenes using scRep
+scaling <- TRUE # w
+var.to.regress <- NULL # supply the var to be regressed if valid
+harmony <- T # Run harmony or not
+n_PCS <- 50 # Amount of Pcs to include
+clustering <- c(TRUE, 4) # Perform clustering, Algorithm
+sub_dir <- NULL
+
+
+feature_vec_chosen <- feature_vec_overall
+```
+
+# Loading of processed seurat
+
+```{r}
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+```
+
+```{r, eval = harmony, echo = harmony}
+reduction_pca <- paste0("harmony_pca.", reduction_name)
+reduction_umap <- paste0("umap.harmony.", reduction_name)
+emb <- seurat_obj[[reduction_pca]]@cell.embeddings # 212005 × 200
+variance <- apply(emb, 2, var)
+pct <- variance / sum(variance) * 100
+```
+
+```{r adding simple quality metrics}
+minUMI <- 500
+maxUMI <- Inf
+minfeat <- 500
+maxfeat <- Inf
+maxmt <- 20
+c(minUMI, maxUMI, minfeat, maxfeat, maxmt) %>%
+  as.data.frame() %>%
+  t() %>%
+  as.data.frame() -> y
+names(y) <- c("minUMI", "maxUMI", "minfeat", "maxfeat", "maxmt")
+
+
+minUMI <- ifelse(is.na(minUMI), min(seurat_obj@meta.data$nCount_RNA), minUMI)
+maxUMI <- ifelse(is.na(maxUMI), max(seurat_obj@meta.data$nCount_RNA), maxUMI)
+minfeat <- ifelse(is.na(minfeat), min(seurat_obj@meta.data$nFeature_RNA), minfeat)
+maxfeat <- ifelse(is.na(maxfeat), max(seurat_obj@meta.data$nFeature_RNA), maxfeat)
+maxmt <- ifelse(is.na(maxmt), max(seurat_obj@meta.data$percent_mt), maxmt)
+
+x <- .adjust_settings(seurat_obj, minUMI, maxUMI, minfeat, maxfeat, maxmt)
+minUMI <- x[1]
+maxUMI <- x[2]
+minfeat <- x[3]
+maxfeat <- x[4]
+x %>%
+  as.data.frame() %>%
+  t() %>%
+  as.data.frame() -> x2
+names(x2) <- c("minUMI", "maxUMI", "minfeat", "maxfeat", "maxmt")
+setting_df <- rbind(y, x2)
+setting_df <- cbind(Settings = c("Input paramaters", "New paramater values"), setting_df)
+gt::gt(setting_df) %>% gt::tab_header(gt::md("**Settings after adjustments**"))
+seurat_obj@meta.data <- seurat_obj@meta.data %>% mutate(
+  Quality = case_when(nCount_RNA >= minUMI &
+    nCount_RNA <= maxUMI &
+    nFeature_RNA >= minfeat &
+    nFeature_RNA <= maxfeat &
+    percent_mt <= maxmt ~ "Passes", .default = "Does-not-Pass")
+)
+# seurat_obj_sub <- subset(
+#   seurat_obj,
+#   nCount_RNA >= minUMI &
+#     nCount_RNA <= maxUMI &
+#     nFeature_RNA >= minfeat &
+#     nFeature_RNA <= maxfeat &
+#     percent_mt <= maxmt
+# )
+```
+
+
+```{r plotting signatures}
+gene_list <- list(
+  BD = c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4"),
+  MG = c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
+  # Mast = c("IL1RL1", "HDC", "TNFSF10", "FGL2", "IL17RB", "CCL2", "CSF1", "IL13"),
+  # pDCs = c("GZMB", "IGJ", "SERPINF1", "ITM2C", "IRF7", "TCF4", "BCL11A", "LILRA4", "MZB1", "DERL3", "IL3RA", "ZFAT", "NRP1", "CLEC4C", "IRF8", "SLC15A4", "BLNK"),
+  # DC_general = c("CD1C", "CLEC9A"),
+  # Prolif = c("UBE2C", "MKI67", "TOP2A"),
+  # Mg_homeostatic = c("PTPRC", "ITGAM", "P2RY12"),
+  # Mg_activated = c("CX3CR1", "GPR34", "FOXP2"),
+  # Mg_Reslike = c("PLCL1", "CEBPD", "VIM"),
+  # Mg_stress = c("HSPA1A", "HSPA1B", "SORCS2"),
+  # Mg_Phag = c("GPNMB", "RGCC", "PPARG"),
+  # Mg_Inflam = c("CCL4", "IL1B", "CCL3"),
+  # Mg_Inflam_ICAM1 = c("ICAM1", "RELB", "TNFAIP3"),
+  # Mg_INFg = c("IFNG", "IFIT2", "IFIT3", "STAT1"),
+  # BAM = c("F13A1", "LYVE1", "CD36"),
+  # BMD_Anti_Inflam = c("CD163", "SELENOP", "MRC1")
+)
+```
+
+
+```{r, eval = T}
+resolution_columns <- grep("^RNA_snn_res\\.",
+  colnames(seurat_obj@meta.data),
+  value = TRUE
+)
+.seurat_dimplot(seurat_obj, reduction = reduction_umap, group = resolution_columns, label = TRUE) & NoLegend()
+.seurat_dimplot(seurat_obj, reduction = reduction_umap, group = "Ann_lvl_1", label = TRUE) & NoLegend()
+ann_2 <- .seurat_dimplot(seurat_obj, reduction = reduction_umap, group = "Ann_lvl_2", label = TRUE) & NoLegend()
+quality <- .seurat_dimplot(seurat_obj, reduction = reduction_umap, group = "Quality", label = TRUE) & NoLegend()
+ann_2 + quality
+Idents(seurat_obj) <- "Ann_lvl_2"
+# VlnPlot(seurat_obj, features = c("Quality"), pt.size = 0)
+
+FeaturePlot(seurat_obj, features = paste0(names(gene_list), "_UCell")[1:8], reduction = reduction_umap) & NoAxes()
+FeaturePlot(seurat_obj, features = paste0(names(gene_list), "_UCell")[9:16], reduction = reduction_umap) & NoAxes()
+```
+
+```{r plot of quality proportion per annotation}
+freq_table <- seurat_obj@meta.data %>%
+  group_by(Ann_lvl_2, Quality) %>%
+  summarise(count = n()) %>%
+  mutate(prop = count / sum(count) * 100) %>%
+  ungroup()
+
+ordering <- freq_table %>%
+  filter(Quality == "Does-not-Pass") %>%
+  arrange(desc(prop)) %>% # highest first
+  pull(Ann_lvl_2)
+freq_table$Ann_lvl_2 <- factor(freq_table$Ann_lvl_2, levels = ordering)
+
+freq_table %>%
+  ggplot(aes(x = Ann_lvl_2, y = prop, fill = Quality)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  # scale_fill_manual(values = unlist(cell_colors)) +
+  RotatedAxis() +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(x = "Annotation Level 2", y = "Percentage", fill = "Quality", title = "Quality") # +
+
+ggsave(here(fig_path, "QC", "quality_per_cell_type.png"))
+```
+
+
+```{r quality proportion ordered but now counts}
+freq_table %>%
+  ggplot(aes(x = Ann_lvl_2, y = count, fill = Quality)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  # scale_fill_manual(values = unlist(cell_colors)) +
+  RotatedAxis() +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(x = "Annotation Level 2", y = "Count", fill = "Quality", title = "Quality") # +
+# facet_grid(. ~ variable, scales = "free", space = "free") # , strip = strip) +
+ggsave(here(fig_path, "QC", "quality_per_cell_type_count.png"))
+```
+
+
+```{r proportion ordered by mg_PLCG2, eval = F}
+freq_table <- seurat_obj@meta.data %>%
+  group_by(sample_name, Ann_lvl_2) %>%
+  summarise(count = n()) %>%
+  group_by(sample_name) %>%
+  mutate(prop = count / sum(count) * 100) %>%
+  ungroup()
+
+ordering <- freq_table %>%
+  filter(Ann_lvl_2 == "Mg_PLCG2") %>%
+  arrange(desc(prop)) %>% # highest first
+  pull(sample_name)
+freq_table$sample_name <- factor(freq_table$sample_name, levels = ordering)
+
+freq_table %>%
+  ggplot(aes(x = sample_name, y = prop, fill = Ann_lvl_2)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  scale_fill_manual(values = unlist(cell_colors)) +
+  RotatedAxis() +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(x = "Annotation Level 2", y = "Percentage", fill = "Ann_lvl_2", title = "Ann_lvl_2 proportion per sample")
+# facet_grid(. ~ tumour_full, scales = "free", space = "free") # , strip = strip) +
+ggsave(here(fig_path, "QC", "Cell_types_ordered_MG_PLCG2.png"))
+
+## High MG_PLCG2 corresponds to more Bad-quality (in general)
+```
+
+
+```{r quality cells per sample}
+freq_table <- seurat_obj@meta.data %>%
+  group_by(tumour_full, sample_name, Quality) %>%
+  summarise(count = n()) %>%
+  group_by(tumour_full, sample_name) %>%
+  mutate(prop = count / sum(count) * 100) %>%
+  ungroup()
+
+ordering <- freq_table %>%
+  filter(Quality == "Passes") %>%
+  arrange(desc(prop)) %>% # highest first
+  pull(sample_name)
+freq_table$sample_name <- factor(freq_table$sample_name, levels = ordering)
+
+freq_table %>%
+  ggplot(aes(x = sample_name, y = prop, fill = Quality)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  # scale_fill_manual(values = unlist(cell_colors)) +
+  RotatedAxis() +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(x = "Annotation Level 2", y = "Percentage", fill = "Quality", title = "Quality proportion per sample") +
+  facet_grid(. ~ tumour_full, scales = "free", space = "free") # , strip = strip) +
+ggsave(here(fig_path, "QC", "Sample_quality.png"))
+
+
+freq_table %>%
+  filter(Quality == "Does-not-Pass") %>%
+  arrange(desc(prop)) %>%
+  head() %>%
+  gt::gt()
+# astrocytoma       ASTR_2020_041_frozen_cells  Does-not-Pass   221 89.8
+# glioblastoma      GBM_2021_015_CT_fresh_cells Does-not-Pass  2445 71.8
+# glioblastoma      GBM_2021_018_fresh_cells    Does-not-Pass  2112 68.1
+# oligodendroglioma ODG_2021_020_3_fresh_cells  Does-not-Pass  1145 64.0
+
+# For QC, perform pseudobulk of samples? (grouped by myeloid/T-cell/B-cell pops)
+# Perform PCA on these pseudobulk samples and highlight the Quality control to show these are falling out.
+```
+
+```{r}
+gene_list <- list(
+  BD = c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4"),
+  MG = c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74"),
+  inflammatory = c("CCL4", "IL1B", "CCL3", "RELB", "ICAM1", "TNFAIP3"), #  Juan microglia paper
+  Anti_inflammatory = c("CD163", "SELENOP", "MRC1") # Juan microglia paper
+)
+```
+
+
+```{r}
+Processed_name_M <- "Myeloid_Harmony_1000"
+seurat_obj_path_M <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name_M, ".qs2")), here(obj_path, paste0(Processed_name_M, ".qs2")))
+seurat_obj_M <- qs_read(seurat_obj_path_M)
+.size(seurat_obj_M)
+
+seurat_obj <- UCell::AddModuleScore_UCell(
+  seurat_obj,
+  features = gene_list
+)
+FeaturePlot(seurat_obj_M, features = paste0(names(gene_list), "_UCell"), reduction = paste0("umap.harmony.", Processed_name_M), order = TRUE) & NoAxes()
+Idents(seurat_obj_M) %>% head()
+Idents(seurat_obj) <- "Ann_lvl_1"
+# seurat_obj$Ann_lvl_1 %>% table()
+VlnPlot(seurat_obj, features = paste0(names(gene_list), "_UCell"))
+
+VlnPlot(
+  seurat_obj,
+  features = "inflammatory_UCell",
+  group.by = "Ann_lvl_2",
+  pt.size = 0, cols = cell_colors
+) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave(here(fig_path, "QC", "inflammation.png"))
+
+
+VlnPlot(
+  seurat_obj,
+  features = "Anti_inflammatory_UCell",
+  group.by = "Ann_lvl_2",
+  pt.size = 0, cols = cell_colors
+) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave(here(fig_path, "QC", "anti_inflammation.png"))
+```
+
+
+```{r ggplot}
+library(ggplot2)
+
+inflammatory <- ggplot(seurat_obj@meta.data, aes(x = tumour_full, y = inflammatory_UCell, fill = tumour_full)) +
+  geom_violin(position = position_dodge(width = 0.8), scale = "width") +
+  geom_jitter(position = position_jitter(seed = 1, width = 0.2, alpha = 0.1)) +
+  geom_boxplot(width = 0.15, position = position_dodge(width = 0.8), outlier.size = 0.3) +
+  theme_bw() +
+  scale_y_continuous(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Cell type", y = "inflammatory_UCell score")
+
+
+anti_inflam <- ggplot(seurat_obj@meta.data, aes(x = tumour_full, y = Anti_inflammatory_UCell, fill = tumour_full)) +
+  geom_violin(position = position_dodge(width = 0.8), scale = "width") +
+  geom_boxplot(width = 0.15, position = position_dodge(width = 0.8), outlier.size = 0.3) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Cell type", y = "Anti_inflammatory_UCell score")
+inflammatory + anti_inflam + plot_layout(guides = "collect")
+ggsave(here(fig_path, "QC", "inflammation_primaries.png"))
+```
+
+```{r session}
+sessionInfo()
+```

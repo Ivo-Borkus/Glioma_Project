@@ -1,0 +1,211 @@
+
+
+```{r}
+Processed_name <- "Harmony"
+sample_col <- "sample_name"
+condition <- "tumour_full"
+reduction_name <- "Inhouse_Harmony"
+
+d <- 50
+k <- 100
+prop <- 0.1
+milo_obj <- .run_milo(Processed_name, n_dims = d, n_ks = k, proportion = prop, sample_col = sample_col, reduction_name = reduction_name)
+milo_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, "_Milo.qs2")), here(obj_path, paste0(Processed_name, "_Milo.qs2")))
+qs_save(milo_obj, milo_obj_path)
+milo_obj <- qs_read(milo_obj)
+
+traj_design <- data.frame(colData(milo_obj))[, c(sample_col, condition)]
+traj_design <- distinct(traj_design)
+dim(traj_design)
+da_results <- testNhoods(milo_obj, design = ~tumour_full, design.df = traj_design)
+
+da_results %>%
+    arrange(-SpatialFDR) %>%
+    head()
+
+plotUMAP(milo_obj) + plotNhoodGraphDA(milo_obj, da_results, alpha = 0.05) +
+    plot_layout(guides = "collect")
+ggsave(paste0(fig_path, "Milo_overview_", processed_name, ".png"))
+
+
+milo_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, "_Milo.qs2")), here(obj_path, paste0(Processed_name, "_Milo.qs2")))
+qs_save(milo_obj, milo_obj_path)
+
+
+## Testing different levels
+# https://bioconductor.org/packages/devel/bioc/vignettes/miloR/inst/doc/milo_contrasts.html
+contrast.all <- c("Astrocytoma - Glioblastoma", "Astrocytoma - Oligodendroma", "Glioblastoma - Oligodendroma")
+# compare weeks 4 and 16, with week 4 as the reference.
+# cont.4vs16.res <- testNhoods(thy.milo, design = ~ 0 + Age, design.df = thy.design, fdr.weighting = "graph-overlap", model.contrasts = c("Age4wk - Age16wk"))
+# head(cont.4vs16.res)
+# this is the edgeR code called by `testNhoods`
+model <- model.matrix(~ 0 + Age, data = thy.design)
+mod.constrast <- makeContrasts(contrasts = contrast.all, levels = model)
+
+mod.constrast
+```
+
+# Milo R
+```{r}
+seurat_obj_sce <- as.SingleCellExperiment(seurat_obj, assay = "RNA")
+seurat_obj_milo <- Milo(seurat_obj_sce)
+reducedDim(seurat_obj_milo, "UMAP") <- reducedDim(seurat_obj_sce, "UMAP.HARMONY.INHOUSE_HARMONY")
+reducedDim(seurat_obj_milo, "PCA") <- reducedDim(seurat_obj_sce, "HARMONY_PCA.INHOUSE_HARMONY")
+
+seurat_obj_milo <- buildGraph(
+    seurat_obj_milo,
+    k = 200,
+    d = 50,
+    transposed = FALSE,
+    get.distance = FALSE,
+    reduced.dim = "PCA"
+)
+
+
+seurat_obj_milo <- makeNhoods(seurat_obj_milo, prop = 0.1, k = 200, d = 50, refined = TRUE)
+
+plotNhoodSizeHist(seurat_obj_milo)
+seurat_obj_milo <- countCells(seurat_obj_milo, meta.data = data.frame(colData(seurat_obj_milo)), sample = "sample_name")
+head(nhoodCounts(traj_milo))
+
+
+traj_design <- data.frame(colData(seurat_obj_milo))[, c("Sample", "tumour_full")]
+traj_design <- distinct(traj_design)
+
+
+seurat_obj_milo <- calcNhoodDistance(seurat_obj_milo, d = 50)
+
+da_results <- testNhoods(seurat_obj_milo, design = ~tumour_full, design.df = traj_design)
+
+da_results %>%
+    arrange(-SpatialFDR) %>%
+    head()
+seurat_obj_milo <- buildNhoodGraph(seurat_obj_milo)
+
+
+plotUMAP(seurat_obj_milo) + plotNhoodGraphDA(seurat_obj_milo, da_results, alpha = 0.05) +
+    plot_layout(guides = "collect")
+
+
+milo_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, "_Milo.qs2")), here(obj_path, paste0(Processed_name, "_Milo.qs2")))
+qs_save(seurat_obj_milo, milo_obj_path)
+```
+
+
+```{r miloR for myeloid, eval = F}
+Processed_name_M <- "T_cells_harmony_1000"
+seurat_obj_path_M <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name_M, ".qs2")), here(obj_path, paste0(Processed_name_M, ".qs2")))
+seurat_obj_M <- qs_read(seurat_obj_path_M)
+.size(seurat_obj_M)
+
+sce_seurat_obj_M <- as.SingleCellExperiment(seurat_obj_M, assay = "RNA")
+milo_seurat_obj_M <- Milo(sce_seurat_obj_M)
+reducedDim(milo_seurat_obj_M, "UMAP") <- reducedDim(sce_seurat_obj_M, "UMAP.HARMONY.T_CELLS_HARMONY_1000")
+reducedDim(milo_seurat_obj_M, "PCA") <- reducedDim(sce_seurat_obj_M, "HARMONY_PCA.T_CELLS_HARMONY_1000")
+
+milo_seurat_obj_M <- buildGraph(
+    milo_seurat_obj_M,
+    k = 50,
+    d = 50,
+    transposed = FALSE,
+    get.distance = FALSE,
+    reduced.dim = "PCA"
+)
+
+milo_seurat_obj_M <- makeNhoods(milo_seurat_obj_M, prop = 0.1, k = 50, d = 50, refined = TRUE)
+
+plotNhoodSizeHist(milo_seurat_obj_M)
+milo_seurat_obj_M <- countCells(milo_seurat_obj_M, meta.data = data.frame(colData(milo_seurat_obj_M)), sample = "sample_name")
+head(nhoodCounts(milo_seurat_obj_M))
+
+traj_design <- data.frame(colData(milo_seurat_obj_M))[, c("sample_name", "tumour_full")]
+traj_design <- distinct(traj_design)
+rownames(traj_design) <- traj_design[, "sample_name"]
+dim(traj_design)
+milo_seurat_obj_M <- calcNhoodDistance(milo_seurat_obj_M, d = 50)
+condition <- "tumour_full"
+da_results <- testNhoods(milo_seurat_obj_M,
+    design = reformulate(condition),
+    design.df = traj_design
+)
+# traj_design$sample_name %>% head()
+da_results %>%
+    arrange(PValue) %>%
+    head()
+
+milo_seurat_obj_M <- buildNhoodGraph(milo_seurat_obj_M)
+
+
+scater::plotUMAP(milo_seurat_obj_M) + plotNhoodGraphDA(milo_seurat_obj_M, da_results, alpha = 0.05) +
+    plot_layout(guides = "collect")
+
+
+milo_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, "_Milo.qs2")), here(obj_path, paste0(Processed_name, "_Milo.qs2")))
+qs_save(milo_seurat_obj_M, milo_obj_path)
+
+
+milo_seurat_obj_M <- qs_read(milo_obj_path)
+```
+
+
+
+
+```{r session}
+sessionInfo()
+```
+
+
+```{r Function milo, eval = F}
+.run_milo <- \(Processed_name, n_dims = 50, n_ks = 100, proportion = 0.1, sample_col = "sample_name"){
+    print("Processing: ")
+    print(Processed_name)
+    print("Paramaters: ")
+    print(paste0("Number of Dimensions: ", n_dims))
+    print(paste0("Number of minimum cells per neighborhood: ", n_ks))
+    print(paste0("Sampling proportion: ", proportion))
+    print(paste0("Sample column: ", sample_col))
+    seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+    obj <- qs_read(seurat_obj_path)
+    print("object is read")
+    .size(seurat_obj_path)
+
+    UMAP_dim <- paste0("UMAP.HARMONY.", toupper(Processed_name))
+    PCA_dim <- paste0("HARMONY_PCA.", toupper(Processed_name))
+
+    sce.obj <- as.SingleCellExperiment(obj, assay = "RNA")
+    milo.obj <- Milo(sce.obj)
+    reducedDim(milo.obj, "UMAP") <- reducedDim(sce.obj, UMAP_dim)
+    reducedDim(milo.obj, "PCA") <- reducedDim(sce.obj, PCA_dim)
+    print("Milo object generated")
+
+    milo.obj <- buildGraph(
+        milo.obj,
+        k = n_ks,
+        d = n_dims,
+        transposed = FALSE,
+        get.distance = FALSE,
+        reduced.dim = "PCA"
+    )
+    print("Graph is built")
+    milo.obj <- makeNhoods(milo.obj, prop = proportion, k = n_ks, d = n_dims, refined = TRUE)
+    plotNhoodSizeHist(milo.obj)
+    milo.obj <- countCells(milo.obj, meta.data = data.frame(colData(milo.obj)), sample = sample_col)
+    head(nhoodCounts(milo.obj))
+    milo.obj <- calcNhoodDistance(milo.obj, d = n_dims)
+    milo.obj <- buildNhoodGraph(milo.obj)
+
+    return(milo.obj)
+}
+
+
+
+
+traj_design <- data.frame(colData(milo_seurat_obj_M))[, c(sample_col, condition)]
+traj_design <- distinct(traj_design)
+dim(traj_design)
+da_results <- testNhoods(milo_seurat_obj_M, design = ~tumour_full, design.df = traj_design)
+
+da_results %>%
+    arrange(-SpatialFDR) %>%
+    head()
+```

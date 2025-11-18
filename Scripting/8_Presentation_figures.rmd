@@ -1,0 +1,543 @@
+
+---
+title: "Processing seurat object"
+author: "Ivo Borkus"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = T, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 10, fig.height = 10
+)
+knitr::render_markdown()
+```
+
+```{css, echo = F}
+pre code, pre, code {
+  white-space: pre !important;
+  overflow-x: scroll !important;
+  word-break: keep-all !important;
+  word-wrap: initial !important;
+}
+
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+```
+
+
+```{r loading libraries, include = FALSE}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(here)
+library(tidyr)
+library(patchwork)
+library(UCell)
+library(qs2)
+source(here("Brain-Met_V2/functions.R"))
+# source(here("External_data/Fastq_processing/metadata_functions.R"))
+```
+
+# Setting paths and names
+
+Here we set the variables necessary to run my custom scripts. The rest of the script therefore should not be tweaked. 
+
+However, as there is an interpretation stage, all code after Results is custom for each object.
+```{r}
+exc_path <- here("Glioma_Project/01_data/Excel")
+rmd_path <- here("Glioma_Project/02_knits/figs")
+obj_path <- here("Glioma_Project/01_data")
+fig_path <- here("Glioma_Project/04_figs")
+
+object_name <- "Processed"
+reduction_name <- "Inhouse_Harmony"
+Processed_name <- "Harmony"
+sample_col <- "sample_name"
+batch_cols <- c(
+  "tumour_full", "tumour_abbreviated", "grade", "Cell_Type", "Cell_Subtype", "sample_name", "IDH_status",
+  "FACS_sorting", "tier_correct", "cell_het_paper_id", "storage_condition", "prior_treatment", "gender", "Tumour_Margin",
+  "Primary_or_Recurrent", "Previous_Surgery", "Radiotherapy", "Chemotherapy", "MGMT_Methylation"
+)
+continous_cols <- c("nCount_RNA", "nFeature_RNA", "percent.mt", "age_at_surgery_correct", "nuclear_fraction")
+
+
+# subsetting <- c("Cell_Type", c("Myeloid", "Dendritic cells", "Mast cells")) #  Subset-col, cells_of_interest
+subsetting <- c(NULL, NULL) #  Subset-col, cells_of_interest
+
+norm_meth_scale <- c(TRUE, "LogNormalize", 10000) # Perform log normalisatin, method, scale
+vf <- c("vst", 2000, FALSE, FALSE) # VF method, amount, use old vf method, silence VDJgenes using scRep
+scaling <- TRUE #
+var.to.regress <- NULL # supply the var to be regressed if valid
+harmony <- T # Run harmony or not
+n_PCS <- 50 # Amount of Pcs to include
+clustering <- c(TRUE, 4) # Perform clustering, Algorithm
+sub_dir <- NULL
+
+
+feature_vec_chosen <- feature_vec_overall
+```
+
+# Loading of processed seurat
+
+```{R loading seurat_Full}
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+
+Processed_name_T <- "T_cells_harmony_1000"
+seurat_obj_path_T <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name_T, ".qs2")), here(obj_path, paste0(Processed_name_T, ".qs2")))
+seurat_obj_T <- qs_read(seurat_obj_path_T)
+.size(seurat_obj_T)
+
+Processed_name_M <- "Myeloid_Harmony_1000"
+seurat_obj_path_M <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name_M, ".qs2")), here(obj_path, paste0(Processed_name_M, ".qs2")))
+seurat_obj_M <- qs_read(seurat_obj_path_M)
+.size(seurat_obj_M)
+
+seurat_obj_M@meta.data$Ann_lvl_2 <- seurat_obj_M@meta.data$Ann_lvl_2M
+seurat_obj_T@meta.data$Ann_lvl_2 <- seurat_obj_T@meta.data$Ann_lvl_2T
+seurat_obj_M_meta <- subset(seurat_obj_M@meta.data, select = c("Ann_lvl_2"))
+seurat_obj_T_meta <- subset(seurat_obj_T@meta.data, select = c("Ann_lvl_2"))
+
+meta_data_to_add <- NULL
+meta_data_to_add <- rbind(seurat_obj_M_meta, seurat_obj_T_meta)
+
+## Adding the data to the T-cell object
+seurat_obj <- AddMetaData(seurat_obj, meta_data_to_add)
+seurat_obj_
+qs_save(seurat_obj, seurat_obj_path)
+```
+
+```{r, eval = harmony, echo = harmony}
+reduction_pca <- paste0("harmony_pca.", reduction_name)
+reduction_umap <- paste0("umap.harmony.", reduction_name)
+emb <- seurat_obj[[reduction_pca]]@cell.embeddings # 212005 × 200
+variance <- apply(emb, 2, var)
+pct <- variance / sum(variance) * 100
+```
+
+
+
+
+```{r}
+DimPlot(seurat_obj, group = "Ann_lvl_2", reduction = reduction_umap)
+
+# ggsave(here(fig_path, paste0("Ann_lvl_2.png")))
+
+
+current_order <- c(
+  "Mg_Inflam", "BAMs", "Mg_classic", "Myeloid_Prolif", "TAMs",
+  "Ma-Inflam", "Mg_Anti-Inflam", "Mg_active", "Ma-IFN", "Ma-Mt+",
+  "Mg_PLCG2", "MAIT-cells", "CD8+_TNFSF9", "NK", "CD8+_Cytotoxic",
+  "DCs_CD1C+", "Mono-Classic", "Hb+", "CD8+ Eff-Exh", "T-IFN",
+  "CD4+ Tfh", "Tregs", "Bad-quality", "CD4+ cm", "T_Prolif",
+  "pDCs", "Mast-cells"
+)
+
+
+
+correct_order <- c(
+  "Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active", "BAMs", "TAMs", "Ma-Inflam", "Ma-IFN", "Ma-Mt+", "Mono-Classic", "Myeloid_Prolif", "DCs_CD1C+", "pDCs", "Mast-cells",
+  "CD8+_TNFSF9", "CD8+_Cytotoxic", "CD8+ Eff-Exh", "CD4+ cm", "CD4+ Tfh", "Tregs", "T-IFN", "T_Prolif", "MAIT-cells", "NK", "Hb+",
+  "Bad-quality"
+)
+unique(seurat_obj$Ann_lvl_2)
+# seurat_obj <- obj
+
+seurat_obj@meta.data$Ann_lvl_2 <- factor(seurat_obj@meta.data$Ann_lvl_2, levels = correct_order)
+cluster_order <- match(levels(seurat_obj@meta.data[["Ann_lvl_2"]]), dittoSeq::metaLevels("Ann_lvl_2", seurat_obj))
+
+DimPlot(seurat_obj, group = "Ann_lvl_2", reduction = reduction_umap)
+dittoSeq::dittoDimPlot(seurat_obj, var = "Ann_lvl_2", reduction.use = reduction_umap)
+
+
+Idents(seurat_obj) <- seurat_obj$Ann_lvl_2
+
+Ann_lvl_1_harmonised <- c(
+  "Microglia", "Microglia", "Microglia", "Microglia",
+  "Microglia", "Macrophage", "Macrophage", "Macrophage",
+  "Macrophage", "Macrophage", "Monocyte", "Myeloid_Prolif",
+  "DCs", "DCs", "Mast-cells", "T-CD8+",
+  "T-CD8+", "T-CD8+", "T-CD4+", "T-CD4+",
+  "T-CD4+", "T-other", "T-Prolif", "T-other",
+  "NK", "Hb+", "Bad-quality"
+)
+
+names(Ann_lvl_1_harmonised) <- levels(seurat_obj)
+seurat_obj <- RenameIdents(seurat_obj, Ann_lvl_1_harmonised)
+seurat_obj[["Ann_lvl_1H"]] <- Idents(seurat_obj)
+DimPlot(seurat_obj, reduction = reduction_umap, group.by = "Ann_lvl_1H", label = T) & NoAxes()
+```
+
+
+
+
+```{r}
+cell_colors <- c(
+  # Mg (purples / blues)
+  "Mg_classic"     = "#5E4FA2", # deep purple
+  "Mg_Inflam"      = "lightpink", # bright blue
+  "Mg_Anti-Inflam" = "#4B99C6", # pale periwinkle
+  "Mg_PLCG2"       = "darkblue", # teal-blue
+  "Mg_active"      = "#2A6F97", # deep ocean blue
+
+  # Mono / macro (warm reds / oranges)
+  "BAMs"           = "#D73027", # vivid red
+  "TAMs"           = "#FC8D59", # warm orange
+  "Ma-Inflam"      = "#E6550D", # strong coral
+  "Ma-IFN"         = "#FDAE61", # light orange
+  "Ma-Mt+"         = "#FEE08B", # pale warm yellow
+  "Mono-Classic"   = "#A53E2B", # brick red
+
+  # Myeloid others (yellows / greens)
+  "Myeloid_Prolif" = "cyan", # gold
+  "DCs_CD1C+"      = "gold", # teal/green
+  "pDCs"           = "yellow", # olive green
+  "Mast-cells"     = "#008B8B", # yellow-orange
+
+  # T cells (greens / blues but distinct from Mg)
+  "CD8+_TNFSF9"    = "darkgreen", # medium green
+  "CD8+_Cytotoxic" = "#2F9A7D", # (shared orange tone for cytotoxic emphasis)
+  "CD8+ Eff-Exh"   = "skyblue", # lime green (distinct shade)
+  "CD4+ cm"        = "#2B60DE", # royal blue
+  "CD4+ Tfh"       = "#74ADD1", # soft blue
+  "Tregs"          = "#2ECC71", # muted blue
+  "T-IFN"          = "#313695", # deep indigo
+
+  # T others (teals / sea-greens different from DCs/pDCs)
+  "T_Prolif"       = "#FFBF00", # dark green (distinct from DCs)
+  "MAIT-cells"     = "pink", # sea-foam
+  "NK"             = "brown", # medium teal-green
+
+  # Bad quality / outliers
+  "Hb+"            = "#BDBDBD", # grey
+  "Bad-quality"    = "#000000" # black
+)
+cell_colors_2 <- c(
+  "Microglia" = "darkblue",
+  "Macrophage" = "red",
+  "Monocyte" = "#A53E2B", # brick red
+  "Myeloid_Prolif" = "cyan", # gold
+  "DCs" = "gold",
+  "Mast-cells" = "#008B8B", # yellow-orange
+  "T-CD8+" = "darkgreen",
+  "T-CD4+" = "#2ECC71",
+  "T-other" = "pink",
+  "T-Prolif" = "#FFBF00", # dark green (distinct from DCs)
+  "NK" = "brown", # medium teal-green
+  # Bad quality / outliers
+  "Hb+" = "#BDBDBD", # grey
+  "Bad-quality" = "#000000" # black
+)
+```
+
+```{r}
+DimPlot(seurat_obj, group.by = "Ann_lvl_2", cols = cell_colors[correct_order], reduction = reduction_umap) & NoAxes()
+DimPlot(seurat_obj, group.by = "Ann_lvl_2", cols = cell_colors, reduction = "umap") & NoAxes()
+ggsave(here(fig_path, paste0("Ann_lvl_2_umap.png")), dpi = 400)
+DimPlot(seurat_obj, group.by = "Ann_lvl_1H", cols = cell_colors_2, reduction = "umap") & NoAxes()
+ggsave(here(fig_path, paste0("Ann_lvl_1H_umap.png")), dpi = 400)
+
+seurat_obj$Ann_lvl_1H
+
+
+
+DimPlot(seurat_obj, group.by = "Ann_lvl_1H", cols = cell_colors_2, reduction = reduction_umap) & NoAxes()
+ggsave(here(fig_path, paste0("Ann_lvl_2.png")), dpi = 400)
+ggsave(here(fig_path, paste0("Ann_lvl_1H.png")), dpi = 400)
+
+dittoSeq::dittoDimPlot(seurat_obj_T, var = "Ann_lvl_2T", color.panel = cell_colors, reduction.use = "umap.harmony.T_cells_harmony_1000", do.label = T) & NoAxes()
+ggsave(here(fig_path, paste0("Ann_lvl_2T.png")), dpi = 400)
+
+dittoSeq::dittoDimPlot(seurat_obj_M, var = "Ann_lvl_2M", color.panel = cell_colors, reduction.use = "umap.harmony.Myeloid_Harmony_1000", do.label = T) & NoAxes()
+ggsave(here(fig_path, paste0("Ann_lvl_2M.png")), dpi = 400)
+
+DimPlot(seurat_obj, group.by = "sample_name", reduction = reduction_umap) & NoAxes()
+# ggsave(here(fig_path, paste0("Ann_lvl_2M.png")), dpi = 400)
+DimPlot(seurat_obj_T, group.by = "sample_name", reduction = "umap.harmony.T_cells_harmony_1000", label = F) & NoAxes()
+ggsave(here(fig_path, paste0("sample_name_T.png")), dpi = 400, width = 15, height = 10)
+
+DimPlot(seurat_obj_M, group.by = "sample_name", reduction = "umap.harmony.Myeloid_Harmony_1000", label = F) & NoAxes()
+
+dittoSeq::dittoDimPlot(seurat_obj_M, var = "Sample", reduction.use = "umap.harmony.Myeloid_Harmony_1000", do.label = T) & NoAxes()
+
+ggsave(here(fig_path, paste0("sample_name_M.png")), dpi = 400, width = 15, height = 10)
+```
+
+
+```{r }
+freq_table <- seurat_obj@meta.data %>%
+  group_by(tumour_full, Sample, Ann_lvl_2) %>%
+  summarise(count = n()) %>%
+  group_by(tumour_full, Sample) %>%
+  mutate(prop = count / sum(count) * 100) %>%
+  ungroup()
+# Extract Mg_Inflam percentages per sample
+ordering <- freq_table %>%
+  filter(Ann_lvl_2 == "Mg_Inflam") %>%
+  arrange(desc(prop)) %>% # highest first
+  pull(Sample)
+
+# Apply this ordering to the Sample column
+freq_table$Sample <- factor(freq_table$Sample, levels = ordering)
+
+freq_table %>%
+  ggplot(aes(fill = Ann_lvl_2, y = prop, x = Sample)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  scale_fill_manual(values = unlist(cell_colors)) +
+  RotatedAxis() +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(x = "Patient", y = "Percentage", fill = "Cell Type") +
+  facet_grid(. ~ tumour_full, scales = "free", space = "free") # , strip = strip) +
+
+ggsave(here(fig_path, paste0("Ann_lvl_2_dittoseq_barplot.png")))
+```
+
+
+
+```{r}
+vec <- c(
+  "tumour_full",
+  "Primary_or_Recurrent",
+  "Previous_Surgery",
+  "MGMT_Methylation",
+  "Radiotherapy",
+  "Chemotherapy",
+  "Tumour_Margin",
+  "gender",
+  "storage_condition",
+  "IDH_status"
+)
+vec <- c("IDH_status")
+
+for (i in vec) {
+  freq_table <- seurat_obj@meta.data %>%
+    group_by(!!sym(i), sample_name, Ann_lvl_1H) %>%
+    summarise(count = n()) %>%
+    group_by(!!sym(i), sample_name) %>%
+    mutate(prop = count / sum(count) * 100) %>%
+    ungroup()
+
+  # Extract Mg_Inflam percentages per sample
+  ordering <- freq_table %>%
+    filter(Ann_lvl_1H == "Microglia") %>%
+    arrange(desc(prop)) %>% # highest first
+    pull(sample_name)
+  # Apply this ordering to the Sample column
+  freq_table$sample_name <- factor(freq_table$sample_name, levels = ordering)
+  freq_table$variable <- freq_table[[i]]
+  freq_table %>%
+    ggplot(aes(fill = Ann_lvl_1H, y = prop, x = sample_name)) +
+    geom_bar(position = "stack", stat = "identity") +
+    theme_classic() +
+    scale_fill_manual(values = unlist(cell_colors_2)) +
+    RotatedAxis() +
+    scale_y_continuous(expand = c(0, 0)) +
+    labs(x = "Patient", y = "Percentage", fill = "Cell Type", title = i) +
+    facet_grid(. ~ variable, scales = "free", space = "free") + # , strip = strip) +
+    theme(plot.margin = unit(c(1, 1, 1, 2), "cm"))
+  ggsave(here(fig_path, paste0("Ann_lvl_1H_", i, "_dittoseq_barplot.png")), width = 15, height = 10, dpi = 450)
+}
+```
+
+
+```{r ann lvl 2}
+vec <- c(
+  "tumour_full",
+  "Primary_or_Recurrent",
+  "Previous_Surgery",
+  "MGMT_Methylation",
+  "Radiotherapy",
+  "Chemotherapy",
+  "Tumour_Margin",
+  "gender",
+  "storage_condition",
+  "IDH_status"
+)
+for (i in vec) {
+  freq_table <- seurat_obj@meta.data %>%
+    group_by(!!sym(i), sample_name, Ann_lvl_2) %>%
+    summarise(count = n()) %>%
+    group_by(!!sym(i), sample_name) %>%
+    mutate(prop = count / sum(count) * 100) %>%
+    ungroup()
+
+  # Extract Mg_Inflam percentages per sample
+  ordering <- freq_table %>% # dittoseq()
+    filter(Ann_lvl_2 == "Mg_Inflam") %>%
+    arrange(desc(prop)) %>% # highest first
+    pull(sample_name)
+  # Apply this ordering to the Sample column
+  freq_table$sample_name <- factor(freq_table$sample_name, levels = ordering)
+  freq_table$variable <- freq_table[[i]]
+  freq_table %>%
+    ggplot(aes(fill = Ann_lvl_2, y = prop, x = sample_name)) +
+    geom_bar(position = "stack", stat = "identity") +
+    theme_classic() +
+    scale_fill_manual(values = unlist(cell_colors)) +
+    RotatedAxis() +
+    scale_y_continuous(expand = c(0, 0)) +
+    labs(x = "Patient", y = "Percentage", fill = "Cell Type", title = i) +
+    facet_grid(. ~ variable, scales = "free", space = "free") + # , strip = strip) +
+
+    theme(plot.margin = unit(c(1, 1, 1, 2), "cm"))
+  ggsave(here(fig_path, paste0("Ann_lvl_2_", i, "_dittoseq_barplot.png")))
+}
+```
+
+
+```{r expression plots}
+seurat_obj_T@meta.data$Ann_lvl_2T <- factor(seurat_obj_T@meta.data$Ann_lvl_2T, levels = correct_order[-c(1:15, 26)])
+Idents(seurat_obj_T) <- seurat_obj_T$Ann_lvl_2T
+
+seurat_obj_M@meta.data$Ann_lvl_2M <- factor(seurat_obj_M@meta.data$Ann_lvl_2M, levels = correct_order[c(1:15, 26)])
+Idents(seurat_obj_M) <- seurat_obj_M$Ann_lvl_2M
+
+
+Mgenes <- c(
+  "TREM2", "APOE",
+  "P2RY12", "SLC12A5",
+  "IL1B", "CCL3L1",
+  "SELENOP",
+  "PLCG2",
+  "TNF",
+  "LYVE1", "F13A1",
+  "CD36", "CCL18", "LGALS3",
+  "SLC2A1",
+  "IFIT1",
+  "MT1H",
+  "S100A12",
+  "TOP2A", "MKI67",
+  "CD1C", "CLEC10A",
+  "IL3RA", "LILRA4",
+  "HDC", "IL1RL1",
+  "HBA1"
+)
+
+table(Idents(seurat_obj))
+table(seurat_obj$Ann_lvl_2)
+
+
+
+
+dot_markers <- DotPlot(seurat_obj_M, features = Mgenes, cluster.idents = F) + theme_bw() + RotatedAxis()
+ggsave(here(fig_path, paste0("Mmarkers_dot.png")), width = 12, height = 7)
+
+
+
+Tgenes <- c(
+  "PTPRC", "CD3D", "CD3E", "CD8A", "CD8B", "CD4", "TNFSF9", "TNFRSF9",
+  "CTLA4", "PDCD1",
+  "LAG3", "GZMH",
+  "GZMK", "CCR7", "SELL",
+  "IL7R", "CD40LG",
+  "FOXP3", "IL2RA",
+  "IFIT1",
+  "TOP2A", "MKI67",
+  "KLRC1", "KRT81", "GNLY",
+  "KLRF1", "FCGR3A"
+)
+
+dot_markers <- DotPlot(seurat_obj_T, features = Tgenes, cluster.idents = F) + theme_bw() + RotatedAxis()
+ggsave(here(fig_path, paste0("Tmarkers_dot.png")), width = 12, height = 7)
+
+all <- c(
+  "TREM2", "APOE", "TMEM119",
+  "P2RY12", "SLC12A5", "APOC2", "CD36", "S100A12", "CD1C", "CLEC10A", "HDC", "CD4", "CD3E", "CD3D", "CD8A", "CD8B", "FOXP3", "IL2RA", "IFIT1", "TOP2A", "MKI67", "KLRF1", "FCGR3A", "HBA1"
+)
+Idents(seurat_obj) <- seurat_obj$Ann_lvl_1H
+dot_markers <- DotPlot(seurat_obj, features = all, cluster.idents = F) + theme_bw() + RotatedAxis()
+ggsave(here(fig_path, paste0("All_dot.png")), width = 12, height = 7)
+
+
+VlnPlot(seurat_obj_M, features = c(c("nCount_RNA", "nFeature_RNA", "percent_mt")), log = T)
+ggsave(here(fig_path, paste0("M_violin.png")), width = 12, height = 7)
+
+
+VlnPlot(seurat_obj_T, features = c(c("nCount_RNA", "nFeature_RNA", "percent_mt")), log = T)
+ggsave(here(fig_path, paste0("T_violin.png")), width = 12, height = 7)
+
+Idents(seurat_obj) <- seurat_obj$Ann_lvl_1H
+VlnPlot(seurat_obj, features = c(c("nCount_RNA", "nFeature_RNA", "percent_mt")), log = T)
+ggsave(here(fig_path, paste0("All_violin_1h.png")), width = 12, height = 7)
+
+
+Idents(seurat_obj) <- seurat_obj$Ann_lvl_2
+VlnPlot(seurat_obj, features = c(c("nCount_RNA", "nFeature_RNA", "percent_mt")), log = T)
+ggsave(here(fig_path, paste0("All_violin_2.png")), width = 20, height = 8)
+```
+
+
+
+
+# results
+
+
+
+```{r testing code, eval = T}
+library(writexl)
+resolution <- "RNA_snn_res.0.7"
+
+Idents(seurat_obj) <- resolution
+DimPlot(seurat_obj, reduction = reduction_umap, group.by = resolution, label = T) & NoLegend() & NoAxes()
+# ggsave(here(fig_path, paste0(resolution, "_", reduction_name, "_Dimplot.png")))
+DimPlot(seurat_obj, reduction = reduction_umap, group.by = "Ann_lvl_1", label = T) & NoLegend() & NoAxes()
+# ggsave(here(fig_path, paste0("Ann_lvl_1", "_", reduction_name, "_Dimplot.png")))
+marker_list <- FindAllMarkers(
+  object = seurat_obj,
+  only.pos = F,
+  min.pct = 0.25,
+  logfc.threshold = 0.25
+)
+table(Idents(seurat_obj)) # Extract rough proportions.
+# .excel_sheet(marker_list, exc_path, paste0(reduction_name, "_", resolution)) # This just puts them into an excel sheet :)
+```
+
+
+```{r}
+resolution_columns <- grep("^RNA_snn_res\\.",
+  colnames(seurat_obj@meta.data),
+  value = TRUE
+)
+plot <- FeaturePlot(seurat_obj, features = c("TMEM119", "LGALS3", "P2RY12", "SLC12A5", "TREM2", "APOE", "PLCL1", "CEBPD", "SELENOP", "VIM", "ICAM1"), reduction = reduction_umap) & NoAxes()
+plot_2 <- DimPlot(seurat_obj, reduction = reduction_umap, group.by = resolution, label = T) & NoLegend() & NoAxes()
+plot + plot_2
+
+plot <- FeaturePlot(seurat_obj, features = c("TMEM119", "LGALS3", "P2RY12", "SLC12A5"), reduction = reduction_umap) & NoAxes()
+.seurat_dimplot(seurat_obj, reduction = reduction_umap, group = resolution_columns, label = TRUE) & NoLegend()
+.seurat_dimplot(seurat_obj, reduction = reduction_umap, group = "Sample", label = F)
+.seurat_dimplot(seurat_obj, reduction = reduction_umap, group = "Ann_lvl_1", label = TRUE) & NoLegend()
+FeaturePlot(seurat_obj, features = feature_vec_T[1:8], reduction = reduction_umap) & NoAxes()
+FeaturePlot(seurat_obj, features = feature_vec_T[9:16], reduction = reduction_umap) & NoAxes()
+
+confounders <- c("nFeature_RNA", "nCount_RNA", "percent_mt")
+# seurat_obj$logfeat <- log(seurat_obj$nFeature_RNA)
+# seurat_obj$logcount <- log(seurat_obj$nCount_RNA)
+# seurat_obj$logmt <- log(seurat_obj$percent_mt + 1)
+
+
+VlnPlot(seurat_obj, features = confounders, log = T)
+# FeaturePlot(seurat_obj, features = confounders, reduction = reduction_umap) & NoAxes()
+# FeaturePlot(seurat_obj, features = c("logfeat", "logcount","logmt"), reduction = reduction_umap) & NoAxes()
+```
+
+## The top 5 DEX markers for each cluster
+
+```{r}
+top5_wide <- marker_list %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), p_val_adj, .by_group = TRUE) %>%
+  slice_head(n = 5) %>%
+  select(cluster, gene) %>%
+  pivot_wider(names_from = cluster, values_from = gene)
+```

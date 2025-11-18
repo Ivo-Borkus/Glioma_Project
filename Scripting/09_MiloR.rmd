@@ -1,0 +1,319 @@
+
+---
+title: "MiloR"
+author: "Ivo Borkus"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = T, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 10, fig.height = 10
+)
+knitr::render_markdown()
+```
+
+```{css, echo = F}
+pre code, pre, code {
+  white-space: pre !important;
+  overflow-x: scroll !important;
+  word-break: keep-all !important;
+  word-wrap: initial !important;
+}
+
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+```
+
+
+```{r loading libraries, include = FALSE}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(here)
+library(tidyr)
+library(patchwork)
+library(UCell)
+library(qs2)
+library(miloR)
+library(SingleCellExperiment)
+library(scater)
+source(here("Brain-Met_V2/functions.R"))
+source(here("Glioma_Project/Scripting/utils.R"))
+# source(here("External_data/Fastq_processing/metadata_functions.R"))
+```
+
+# Setting paths and names
+
+Here we set the variables necessary to run my custom scripts. The rest of the script therefore should not be tweaked. 
+
+However, as there is an interpretation stage, all code after Results is custom for each object.
+```{r}
+exc_path <- here("Glioma_Project/01_data/Excel")
+rmd_path <- here("Glioma_Project/02_knits/figs")
+obj_path <- here("Glioma_Project/01_data")
+fig_path <- here("Glioma_Project/04_figs")
+
+object_name <- "Processed"
+reduction_name <- "Inhouse_Harmony"
+Processed_name <- "Harmony"
+sample_col <- "sample_name"
+batch_cols <- c(
+  "tumour_full", "tumour_abbreviated", "grade", "Cell_Type", "Cell_Subtype", "sample_name", "IDH_status",
+  "FACS_sorting", "tier_correct", "cell_het_paper_id", "storage_condition", "prior_treatment", "gender", "Tumour_Margin",
+  "Primary_or_Recurrent", "Previous_Surgery", "Radiotherapy", "Chemotherapy", "MGMT_Methylation"
+)
+continous_cols <- c("nCount_RNA", "nFeature_RNA", "percent.mt", "age_at_surgery_correct", "nuclear_fraction")
+
+
+# subsetting <- c("Cell_Type", c("Myeloid", "Dendritic cells", "Mast cells")) #  Subset-col, cells_of_interest
+subsetting <- c(NULL, NULL) #  Subset-col, cells_of_interest
+
+norm_meth_scale <- c(TRUE, "LogNormalize", 10000) # Perform log normalisatin, method, scale
+vf <- c("vst", 2000, FALSE, FALSE) # VF method, amount, use old vf method, silence VDJgenes using scRep
+scaling <- TRUE #
+var.to.regress <- NULL # supply the var to be regressed if valid
+harmony <- T # Run harmony or not
+n_PCS <- 50 # Amount of Pcs to include
+clustering <- c(TRUE, 4) # Perform clustering, Algorithm
+sub_dir <- NULL
+feature_vec_chosen <- feature_vec_overall
+```
+
+
+# Loading of processed seurat
+```{r preprocessing seurat object}
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+
+reduction_pca <- paste0("harmony_pca.", reduction_name)
+reduction_umap <- paste0("umap.harmony.", reduction_name)
+```
+
+```{r, eval, = F}
+current_order <- c(
+  "Mg_Inflam", "BAMs", "Mg_classic", "Myeloid_Prolif", "TAMs",
+  "Ma-Inflam", "Mg_Anti-Inflam", "Mg_active", "Ma-IFN", "Ma-Mt+",
+  "Mg_PLCG2", "MAIT-cells", "CD8+_TNFSF9", "NK", "CD8+_Cytotoxic",
+  "DCs_CD1C+", "Mono-Classic", "Hb+", "CD8+ Eff-Exh", "T-IFN",
+  "CD4+ Tfh", "Tregs", "Bad-quality", "CD4+ cm", "T_Prolif",
+  "pDCs", "Mast-cells"
+)
+
+
+
+correct_order <- c(
+  "Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active", "BAMs", "TAMs", "Ma-Inflam", "Ma-IFN", "Ma-Mt+", "Mono-Classic", "Myeloid_Prolif", "DCs_CD1C+", "pDCs", "Mast-cells",
+  "CD8+_TNFSF9", "CD8+_Cytotoxic", "CD8+ Eff-Exh", "CD4+ cm", "CD4+ Tfh", "Tregs", "T-IFN", "T_Prolif", "MAIT-cells", "NK", "Hb+",
+  "Bad-quality"
+)
+# seurat_obj <- obj
+
+seurat_obj@meta.data$Ann_lvl_2 <- factor(seurat_obj@meta.data$Ann_lvl_2, levels = correct_order)
+cluster_order <- match(levels(seurat_obj@meta.data[["Ann_lvl_2"]]), dittoSeq::metaLevels("Ann_lvl_2", seurat_obj))
+
+# DimPlot(seurat_obj, group = "Ann_lvl_2", reduction = reduction_umap)
+# dittoSeq::dittoDimPlot(seurat_obj, var = "Ann_lvl_2", reduction.use = reduction_umap)
+
+
+Idents(seurat_obj) <- seurat_obj$Ann_lvl_2
+
+Ann_lvl_1_harmonised <- c(
+  "Microglia", "Microglia", "Microglia", "Microglia",
+  "Microglia", "Macrophage", "Macrophage", "Macrophage",
+  "Macrophage", "Macrophage", "Monocyte", "Myeloid_Prolif",
+  "DCs", "DCs", "Mast-cells", "T-CD8+",
+  "T-CD8+", "T-CD8+", "T-CD4+", "T-CD4+",
+  "T-CD4+", "T-other", "T-Prolif", "T-other",
+  "NK", "Hb+", "Bad-quality"
+)
+
+names(Ann_lvl_1_harmonised) <- levels(seurat_obj)
+seurat_obj <- RenameIdents(seurat_obj, Ann_lvl_1_harmonised)
+seurat_obj[["Ann_lvl_1H"]] <- Idents(seurat_obj)
+qs_save(seurat_obj, seurat_obj_path)
+```
+
+```{r glioma project colours}
+cell_colors <- c(
+  "Mg_classic"     = "#5E4FA2",
+  "Mg_Inflam"      = "lightpink",
+  "Mg_Anti-Inflam" = "#4B99C6",
+  "Mg_PLCG2"       = "darkblue",
+  "Mg_active"      = "#2A6F97",
+  "BAMs"           = "#D73027",
+  "TAMs"           = "#FC8D59",
+  "Ma-Inflam"      = "#E6550D",
+  "Ma-IFN"         = "#FDAE61",
+  "Ma-Mt+"         = "#FEE08B",
+  "Mono-Classic"   = "#A53E2B",
+  "Myeloid_Prolif" = "cyan",
+  "DCs_CD1C+"      = "gold",
+  "pDCs"           = "yellow",
+  "Mast-cells"     = "#008B8B",
+  "CD8+_TNFSF9"    = "darkgreen",
+  "CD8+_Cytotoxic" = "#2F9A7D",
+  "CD8+ Eff-Exh"   = "skyblue",
+  "CD4+ cm"        = "#2B60DE",
+  "CD4+ Tfh"       = "#74ADD1",
+  "Tregs"          = "#2ECC71",
+  "T-IFN"          = "#313695",
+  "T_Prolif"       = "#FFBF00",
+  "MAIT-cells"     = "pink",
+  "NK"             = "brown",
+  "Hb+"            = "#BDBDBD",
+  "Bad-quality"    = "#000000"
+)
+cell_colors_2 <- c(
+  "Microglia" = "darkblue",
+  "Macrophage" = "red",
+  "Monocyte" = "#A53E2B",
+  "Myeloid_Prolif" = "cyan",
+  "DCs" = "gold",
+  "Mast-cells" = "#008B8B",
+  "T-CD8+" = "darkgreen",
+  "T-CD4+" = "#2ECC71",
+  "T-other" = "pink",
+  "T-Prolif" = "#FFBF00",
+  "NK" = "brown",
+  "Hb+" = "#BDBDBD",
+  "Bad-quality" = "#000000"
+)
+```
+
+
+```{r specific function}
+
+```
+
+```{r output}
+Processed_name <- "Harmony"
+sample_col <- "sample_name"
+condition <- "IDH_status"
+reduction_name <- "Inhouse_Harmony"
+sub_dir <- NULL
+d <- 50
+k <- 100
+prop <- 0.1
+
+# milo.obj <- .run_milo(Processed_name, n_dims = d, n_ks = k, proportion = prop, sample_col = sample_col, reduction_name = reduction_name)
+milo.obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, "_Milo.qs2")), here(obj_path, paste0(Processed_name, "_Milo.qs2")))
+# qs_save(milo.obj, milo.obj_path)
+
+milo.obj <- qs_read(milo.obj_path)
+.size(milo.obj)
+```
+
+```{r testing}
+traj_design <- data.frame(colData(milo.obj))[, c(sample_col, condition)]
+traj_design <- distinct(traj_design)
+dim(traj_design)
+rownames(traj_design) <- traj_design[, "sample_name"]
+traj_design[[condition]] <- factor(traj_design[[condition]])
+
+contrast.1 <- c(paste0(condition, "mutant - ", condition, "wild_type")) # the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+da_results <- testNhoods(milo.obj,
+  design = reformulate(paste0(" 0 + ", condition)),
+  design.df = traj_design, model.contrasts = contrast.1,
+  fdr.weighting = "graph-overlap", norm.method = "logMS"
+)
+
+da_results %>%
+  arrange(SpatialFDR) %>%
+  head(n = 10)
+milo.obj <- buildNhoodGraph(milo.obj)
+
+
+
+output_figure <- DimPlot(seurat_obj, group.by = "Ann_lvl_1H", cols = cell_colors_2, reduction = reduction_umap) + NoAxes() + plotNhoodGraphDA(milo.obj, da_results, alpha = 0.10) +
+  plot_layout(guides = "collect") + plot_annotation(title = "Milo DA results (spatialFDR: 10%)", subtitle = contrast.1)
+
+da_results <- annotateNhoods(milo.obj, da_results, coldata_col = "Ann_lvl_2")
+ggplot(da_results, aes(Ann_lvl_2_fraction)) +
+  geom_histogram(bins = 50)
+
+da_results$celltype <- ifelse(da_results$Ann_lvl_2_fraction < 0.7, "Mixed", da_results$Ann_lvl_2)
+output_figure_2 <- plotDAbeeswarm(da_results, group.by = "celltype") + plot_annotation(title = "Milo DA results (spatialFDR: 10%)", subtitle = contrast.1)
+ggsave(filename = here(fig_path, "milo", paste0("miloR_umap", contrast.1, ".png")), plot = output_figure)
+ggsave(filename = here(fig_path, "milo", paste0("miloR_beeswarm", contrast.1, ".png")), plot = output_figure_2)
+```
+
+
+```{r testing in bulk}
+seurat_obj$Chemotherapy %>% unique()
+condition <- "Chemotherapy"
+contrast.1 <- c(paste0(condition, "Yes - ", condition, "No")) # the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+colData(milo.obj)$Chemotherapy <- make.names(colData(milo.obj)$Chemotherapy)
+
+da_results <- .run_DAtest(milo.obj, condition, contrast.1)
+
+
+condition <- "Primary_or_Recurrent"
+seurat_obj[[condition]] %>% unique()
+
+contrast.1 <- c(paste0(condition, "Primary - ", condition, "Recurrent")) # the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+colData(milo.obj)[[condition]] <- make.names(colData(milo.obj)[[condition]])
+
+da_results <- .run_DAtest(milo.obj, condition, contrast.1)
+
+condition <- "gender"
+seurat_obj[[condition]] %>% unique()
+
+contrast.1 <- c(paste0(condition, "M - ", condition, "F")) # the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+colData(milo.obj)[[condition]] <- make.names(colData(milo.obj)[[condition]])
+
+da_results <- .run_DAtest(milo.obj, condition, contrast.1)
+
+condition <- "Primary_or_Recurrent"
+seurat_obj[[condition]] %>% unique()
+contrast.1 <- c(paste0(condition, "Primary - ", condition, "Recurrent")) # the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+colData(milo.obj)[[condition]] <- make.names(colData(milo.obj)[[condition]])
+da_results <- .run_DAtest(milo.obj, condition, contrast.1)
+
+condition <- "Radiotherapy"
+seurat_obj[[condition]] %>% unique()
+contrast.1 <- c(paste0(condition, "Yes - ", condition, "No")) # the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+colData(milo.obj)[[condition]] <- make.names(colData(milo.obj)[[condition]])
+da_results <- .run_DAtest(milo.obj, condition, contrast.1)
+
+
+condition <- "MGMT_Methylation"
+seurat_obj[[condition]] %>% unique()
+contrast.1 <- c(paste0(condition, "Methylated - ", condition, "Unmethylated")) # the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+colData(milo.obj)[[condition]] <- make.names(colData(milo.obj)[[condition]])
+da_results <- .run_DAtest(milo.obj, condition, contrast.1)
+
+
+condition <- "tumour_full"
+seurat_obj[[condition]] %>% unique()
+contrast.1 <- c(paste0(condition, "astrocytoma - ", condition, "glioblastoma"))
+da_results <- .run_DAtest(milo.obj, condition, contrast.1)
+contrast.1 <- c(paste0(condition, "astrocytoma - ", condition, "oligodendroglioma"))
+da_results <- .run_DAtest(milo.obj, condition, contrast.1)
+contrast.1 <- c(paste0(condition, "oligodendroglioma - ", condition, "glioblastoma"))
+da_results <- .run_DAtest(milo.obj, condition, contrast.1)
+
+
+# colData(milo.obj)[[condition]] <- make.names(colData(milo.obj)[[condition]])
+da_results <- .run_DAtest(milo.obj, condition, contrast.1)
+```
+
+```{r}
+sessionInfo()
+```
+
+rmarkdown::render(
+    input = paste0("Glioma_Project/Scripting/09_MiloR.rmd"),
+    output_format = "html_document",
+    output_dir = here("Glioma_Project/02_knits"),
+    output_file = paste0(Sys.Date(), "09_MiloR.html")
+)
