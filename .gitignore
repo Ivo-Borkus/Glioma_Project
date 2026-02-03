@@ -433,4 +433,4 @@ FodyWeavers.xsd
 04_figs/*
 !04_figs/README.txt
 DoubletFinder.rmd
-*.
+.git*
