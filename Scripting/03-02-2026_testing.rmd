@@ -165,6 +165,28 @@ p2 <- .seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name), 
 p1 + p2
 # p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'sample_name', pt.size = 1) + theme(legend.position = 'none')
 
+Idents(obj) <- 'Ann_lvl_2'
+marker_list <- FindAllMarkers(
+    object = obj,
+    only.pos = F,
+    min.pct = 0.25,
+    logfc.threshold = 0.25
+)
+.marker_plot <- \(obj,marker_list,nmarkers = 5,cluster_var = F){
+    list_genes_clust <-marker_list %>%
+        arrange(cluster, desc(avg_log2FC)) %>% # Arrange within each cluster
+        group_by(cluster) %>%
+        select(cluster,gene) %>%
+        slice_head(n = nmarkers) %>%
+        group_split() %>% # Split into list by 'cluster'
+        setNames(unique(markers$cluster)) 
+    features <- unique(unlist(lapply(list_genes_clust, \(df){df$gene}),use.names = F))
+    p <- DotPlot(obj, features = features, cluster.idents = cluster_var) + theme_bw() + RotatedAxis()
+    return(p)
+}
+
+.marker_plot(obj,marker_list)
+ggsave(here('Glioma_Project/04_figs/markers_T.pdf'), width = 12, height = 4.5)
 
 ```
 
