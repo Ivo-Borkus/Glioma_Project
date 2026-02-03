@@ -112,6 +112,8 @@ p <- VlnPlot(seurat_obj, features = c('nCount_RNA','nFeature_RNA','percent_mt'),
 # p
 # dev.off()
 Idents(seurat_obj) <- 'Ann_lvl_2'
+seurat_obj$log_nCount_RNA <- log(seurat_obj$nCount_RNA, base = 10)
+seurat_obj$log_nFeature_RNA <- log(seurat_obj$nFeature_RNA, base = 10)
 Myeloid_anns <- c("Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active", "BAMs", "TAMs", "Ma-Inflam", "Ma-IFN", "Ma-Mt+", "Mono-Classic","Myeloid_Prolif","DCs_CD1C+","pDCs",'Mast-cells')
 T_anns <- c('CD8+_TNFSF9','CD8+_Cytotoxic','CD8+ Eff-Exh','CD4+ cm','CD4+ Tfh','Tregs','T-IFN','T_Prolif','MAIT-cells','NK')
 seurat_obj_M <- subset(x = seurat_obj, idents = Myeloid_anns, invert = F)
@@ -131,8 +133,6 @@ obj <- RunPCA(
         reduction.name = paste0("pca_", reduction_name),
         npcs = 100
     )
-# p1 <-.seurat_dimplot(obj, reduction = 'pca_T',label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) + theme(legend.position = 'none')
-# p1 <-DimPlot(obj, reduction = 'pca_T',dims = c(3,4),label = T,group = 'Ann_lvl_2', pt.size = 1) + theme(legend.position = 'none')
 ElbowPlot(obj, reduction = paste0("pca_", reduction_name), ndims = 100)
 VizDimLoadings(obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 15)
 n_PCS <- 20
@@ -163,8 +163,6 @@ resolution_columns <- grep("^RNA_snn_res\\.",
 )
 p2 <- .seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name), group = resolution_columns, label = TRUE) & NoLegend()
 p1 + p2
-# p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'sample_name', pt.size = 1) + theme(legend.position = 'none')
-
 Idents(obj) <- 'Ann_lvl_2'
 marker_list <- FindAllMarkers(
     object = obj,
@@ -186,7 +184,76 @@ marker_list <- FindAllMarkers(
 }
 
 .marker_plot(obj,marker_list)
-ggsave(here('Glioma_Project/04_figs/markers_T.pdf'), width = 12, height = 4.5)
+ggsave(here('Glioma_Project/04_figs/markers_T_dot.pdf'), width = 12, height = 4.5)
+p1 <- VlnPlot(obj, features = c('log_nCount_RNA','log_nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
+p2 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
+p3 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = features) & NoLegend()
+plot <- p1 + p2
+ggsave(here('Glioma_Project/04_figs/violin_T.pdf'), width = 12, height = 10, plot = plot)
+ggsave(here('Glioma_Project/04_figs/markers_T.pdf'), width = 15, height = 30, plot = p3)
+```
+
+```{r myeloid}
+obj <- seurat_obj_M
+reduction_name <- 'M'
+samples_to_use <- obj@meta.data %>% group_by(sample_name) %>% summarise(count = n()) %>% filter(count> 1) %>% select(sample_name) %>%unlist(as.vector(.))# as.vector()
+obj <- subset(obj, subset = sample_name %in% samples_to_use)
+obj[["RNA"]] <- split(obj[["RNA"]], f = obj@meta.data[["sample_name"]])
+obj <- FindVariableFeatures(obj, selection.method = 'vst', nfeatures = 1000, verbose = F)
+VariableFeatures(obj) <- .remove_VDJ(VariableFeatures(obj))
+obj <- ScaleData(object = obj, features = VariableFeatures(obj), verbose = FALSE)
+obj <- RunPCA(
+        object = obj, features = VariableFeatures(obj),
+        nfeatures.print = 5, ndims.print = 1:2,
+        reduction.name = paste0("pca_", reduction_name),
+        npcs = 100
+    )
+ElbowPlot(obj, reduction = paste0("pca_", reduction_name), ndims = 100)
+VizDimLoadings(obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 15)
+n_PCS <- 20
+obj <- RunPCA(
+        object = obj, features = VariableFeatures(obj),
+        nfeatures.print = 5, ndims.print = 1:2,
+        reduction.name = paste0("pca_", reduction_name),
+        npcs = n_PCS
+    )
+
+obj <- IntegrateLayers(
+            object = obj, method = HarmonyIntegration,
+            orig.reduction = paste0("pca_", reduction_name), new.reduction = paste0("harmony_pca.", reduction_name),
+            verbose = TRUE
+        )
+obj <- FindNeighbors(obj, reduction = paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS))
+res_values <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.5)
+obj <- FindClusters(obj, resolution = res_values, algorithm = clustering[2])
+obj <- RunUMAP(obj, reduction =  paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS), reduction.name =  paste0("harmony_umap.", reduction_name))
+obj <- JoinLayers(obj)
+
+p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
+resolution_columns <- grep("^RNA_snn_res\\.",
+    colnames(obj@meta.data),
+    value = TRUE
+)
+p2 <- .seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name), group = resolution_columns, label = TRUE) & NoLegend()
+p1 + p2 # quick vis
+
+
+Idents(obj) <- 'Ann_lvl_2'
+marker_list <- FindAllMarkers(
+    object = obj,
+    only.pos = F,
+    min.pct = 0.25,
+    logfc.threshold = 0.25
+)
+
+.marker_plot(obj,marker_list)
+ggsave(here('Glioma_Project/04_figs/markers_M_dot.pdf'), width = 12, height = 4.5)
+p1 <- VlnPlot(obj, features = c('log_nCount_RNA','log_nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
+p2 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
+p3 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = features) & NoLegend()
+plot <- p1 + p2
+ggsave(here('Glioma_Project/04_figs/violin_M.pdf'), width = 12, height = 10, plot = plot)
+ggsave(here('Glioma_Project/04_figs/markers_M.pdf'), width = 15, height = 30, plot = p3)
 
 ```
 
@@ -198,7 +265,7 @@ Then if you want to add significance you could either average the scores by pati
 or pseudobulk only myeloid per patient and score at a pseudobulk level (I would prefer this approach), 
 then you can apply a max rank sum test on the score per patient between groups (disease/IDH-status...).
 
-```{r pro anti sign}
+```{r pro anti sign, eval = F}
 immune_markers
 gene_list <- list(
     inflammatory = c("CCL4", "IL1B", "CCL3", "RELB", "ICAM1", "TNFAIP3"), #  Juan microglia paper
@@ -225,13 +292,13 @@ gene_list <- list(
 # )
 ```
 
-```{r residency sig}
+```{r residency sig, eval = F}
 BD <-  c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4")
 MG <- c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
 ```
 
 
-```{r computing signatures on subsets}
+```{r computing signatures on subsets, eval = F}
 
 seurat_obj <- AddModuleScore_UCell(seurat_obj,
     features = gene_list
@@ -247,3 +314,10 @@ Plus let's try to figure out what this mixed population is (doublets? proliferat
 otherwise I would also remove them as it is not providing any helpful information. 
 You can also run scCODA to validate these findings both for the diseases and the IDH mut/wt.
 
+```{r}
+sessionInfo()
+```
+
+```{r,eval = F}
+rmarkdown::render(here::here('Glioma_Project/Scripting/03-02-2026_testing.rmd'), output_dir = here::here('Glioma_Project/02_knits'),output_file = "Anno_investigations.html")
+```

@@ -656,7 +656,7 @@ plotting_PCA_regress <- \(df_corr, limit_n = 0.5){
     features <- FeaturePlot(seurat_obj,
         features = features,
         reduction = reduction,
-        ncol = ncol, order = TRUE
+        ncol = ncol, order = TRUE, raster = TRUE
     ) & NoAxes() # & labs(title = paste0("Data: ", reduction_name, " plot of features "))
     return(features)
 }
