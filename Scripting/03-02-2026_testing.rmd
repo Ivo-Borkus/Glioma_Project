@@ -1,0 +1,132 @@
+---
+title: "Current status check"
+author: "Ivo Borkus"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = T, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 10, fig.height = 10
+)
+knitr::render_markdown()
+```
+
+```{css, echo = F}
+pre code, pre, code {
+  white-space: pre !important;
+  overflow-x: scroll !important;
+  word-break: keep-all !important;
+  word-wrap: initial !important;
+}
+
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+```
+```{r loading libraries, include = FALSE}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(here)
+library(tidyr)
+library(patchwork)
+library(UCell)
+library(qs2)
+source(here("Brain-Met_V2/functions.R"))
+# source(here("External_data/Fastq_processing/metadata_functions.R"))
+```
+
+# Setting paths and names
+
+Here we set the variables necessary to run my custom scripts. The rest of the script therefore should not be tweaked. 
+
+However, as there is an interpretation stage, all code after Results is custom for each object.
+```{r}
+exc_path <- here("Glioma_Project/01_data/Excel")
+rmd_path <- here("Glioma_Project/02_knits/figs")
+obj_path <- here("Glioma_Project/01_data")
+fig_path <- here("Glioma_Project/04_figs")
+
+object_name <- "Processed"
+reduction_name <- "Inhouse_Harmony"
+Processed_name <- "Harmony"
+sample_col <- "sample_name"
+batch_cols <- c(
+  "tumour_full", "tumour_abbreviated", "grade", "Cell_Type", "Cell_Subtype", "sample_name", "IDH_status",
+  "FACS_sorting", "tier_correct", "cell_het_paper_id", "storage_condition", "prior_treatment", "gender", "Tumour_Margin",
+  "Primary_or_Recurrent", "Previous_Surgery", "Radiotherapy", "Chemotherapy", "MGMT_Methylation"
+)
+continous_cols <- c("nCount_RNA", "nFeature_RNA", "percent.mt", "age_at_surgery_correct", "nuclear_fraction")
+
+
+# subsetting <- c("Cell_Type", c("Myeloid", "Dendritic cells", "Mast cells")) #  Subset-col, cells_of_interest
+subsetting <- c(NULL, NULL) #  Subset-col, cells_of_interest
+
+norm_meth_scale <- c(TRUE, "LogNormalize", 10000) # Perform log normalisatin, method, scale
+vf <- c("vst", 2000, FALSE, FALSE) # VF method, amount, use old vf method, silence VDJgenes using scRep
+scaling <- TRUE # w
+var.to.regress <- NULL # supply the var to be regressed if valid
+harmony <- T # Run harmony or not
+n_PCS <- 50 # Amount of Pcs to include
+clustering <- c(TRUE, 4) # Perform clustering, Algorithm
+sub_dir <- NULL
+
+
+feature_vec_chosen <- feature_vec_overall
+```
+
+```{r}
+seurat_obj_path <- ifelse(!is.null(sub_dir), here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+```
+
+```{r, eval = F}
+meta_df <- seurat_obj@meta.data
+meta_df[,c(9:30,38:40)] %>% distinct() -> new_df
+new_df %>% tibble::remove_rownames() -> distinct_meta
+check <- lapply(colnames(distinct_meta),\(c){if(class(distinct_meta[[c]]) == 'list'){distinct_meta[[c]] <- as.character(distinct_meta[[c]])} else {distinct_meta[[c]]} }) %>% as.data.frame()
+colnames(check) <- colnames(distinct_meta)
+write.csv(check, here('Glioma_Project/01_data/00_metadata.csv'))
+
+seurat_obj@meta.data$file_name %>% unique()
+(seurat_obj$cell_het_paper_id == 'ODG-7') %>% table() # Strange
+```
+
+```{r}
+seurat_obj
+```
+
+# To Do
+RE: pro/anti-inf signatures, I think it would make sense to compute the overall 
+signatures only on myeloid cells to compare the three diseases but you could also stratify then into
+ microglia, macrophages and monocytes (DCs could be included but I don't think this signatures really apply to them).
+Then if you want to add significance you could either average the scores by patient (only myeloid) 
+or pseudobulk only myeloid per patient and score at a pseudobulk level (I would prefer this approach), 
+then you can apply a max rank sum test on the score per patient between groups (disease/IDH-status...).
+
+```{r pro anti sign}
+
+```
+
+```{r residency sig}
+BD <-  c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4")
+MG <- c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
+
+```
+
+RE: Milo, would make more sense to split Lymphoid and Myeloid cells and maybe,
+just for the plots, split the myeloids into microglia, macrophages, monocytes and DCs
+and the lymphoid into CD4, CD8, NK and B cells if any? 
+and I would definitely remove the bad quality and the Hb+ cells as they will only add more noise (from all of the analyses actually).
+Plus let's try to figure out what this mixed population is (doublets? proliferative?),
+otherwise I would also remove them as it is not providing any helpful information. 
+You can also run scCODA to validate these findings both for the diseases and the IDH mut/wt.

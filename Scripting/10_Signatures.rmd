@@ -89,7 +89,7 @@ feature_vec_chosen <- feature_vec_overall
 # Loading of processed seurat
 
 ```{r}
-seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+seurat_obj_path <- ifelse(!is.null(sub_dir), here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
 seurat_obj <- qs_read(seurat_obj_path)
 .size(seurat_obj)
 ```

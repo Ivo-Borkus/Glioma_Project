@@ -102,7 +102,7 @@ for (list_col in colnames(seurat_obj@meta.data)[lapply(seurat_obj@meta.data, cla
     print(paste0(list_col, "_correct"))
 }
 
-pattern <- "^([A-Z]+)_(?:\\d{4}_)?(\\d{3}).*"
+pattern <- "^([A-Z]+)_(?:\\d{4}_)?(\\d{3}).*" # This is incorrect
 sub(pattern, "\\1_\\2", head(seurat_obj@meta.data[[sample_col]]))
 
 seurat_obj@meta.data$Sample <- sub(pattern, "\\1_\\2", seurat_obj@meta.data[[sample_col]])
@@ -261,25 +261,6 @@ df$Before <- pre
 df$After <- post
 names(df) <- c("Sample", "Filtered %", "Before", "After")
 df_arranged <- df %>% arrange(desc(`Filtered %`))
-
-# temp <- list()
-
-# for (sample_name in df_arranged$Sample) {
-#     df_temp <- seurat_obj@meta.data %>% filter(Sample == sample_name)
-#     Batch_ID <- unique(df_temp$Batch)
-#     Tissue_ID <- unique(df_temp$Tissue)
-#     Time_point <- unique(df_temp$TP)
-
-#     temp[[sample_name]] <- c(Batch_ID, Tissue_ID, Time_point)
-# }
-# temp_T <- temp %>%
-#     as.data.frame() %>%
-#     t()
-# new_df <- cbind(df_arranged, temp_T)
-# row.names(new_df) <- NULL
-
-
-# names(new_df) <- c("Sample", "Filtered %", "Before", "After", "Batch", "Tissue", "Time point")
 ```
 
 # Filtering outcome overall
@@ -305,9 +286,6 @@ gt::gt(df_arranged) %>%
         `Filtered %` = md("**Filtered %**"),
         Before = md("Before"),
         After = md("After"),
-        # Batch = md("Batch"),
-        # Tissue = md("Tissue"),
-        # `Time point` = md("Time point")
     )
 ```
 
@@ -320,22 +298,5 @@ sessionInfo()
 ```{r old functions, echo = F, eval = F}
 library(here)
 rmarkdown::render("Glioma_Project/Scripting/QC_seurat.rmd", output_dir = "Glioma_Project/02_knits", output_file = paste0(Sys.Date(), "Seurat_QC_Glioma.html"))
-
-# ggsave(filename = here(fig_path, paste0("Cell_count_per_sample_", Sys.Date(), "_.pdf")), dpi = 300)
-# ggsave(filename = here(fig_path, paste0("Cell_count_per_sample_", Sys.Date(), "_.png")), dpi = 500)
-
-
-# gg_nc <- .ncount_plot(seurat_obj, fill_variable = "TP")
-# ggsave(filename = here(fig_path, paste0("ncount_plot_", Sys.Date(), "_.pdf")), dpi = 300)
-# ggsave(filename = here(fig_path, paste0("ncount_plot_", Sys.Date(), "_.png")), dpi = 500)
-
-
-# gg_nf <- .nfeat_plot(seurat_obj, fill_variable = "TP")
-# ggsave(filename = here(fig_path, paste0("nfeat_plot_", Sys.Date(), "_.pdf")), dpi = 300)
-# ggsave(filename = here(fig_path, paste0("nfeat_plot_", Sys.Date(), "_.png")), dpi = 500)
-
-# gg_mt <- .nmt_plot(seurat_obj, low_mt = NULL, fill_variable = "TP")
-# ggsave(filename = here(fig_path, paste0("nmt_plot_", Sys.Date(), "_.pdf")), dpi = 300)
-# ggsave(filename = here(fig_path, paste0("nmt_plot_", Sys.Date(), "_.png")), dpi = 500)
 ```
 
