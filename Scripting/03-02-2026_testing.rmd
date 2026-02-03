@@ -40,7 +40,12 @@ library(tidyr)
 library(patchwork)
 library(UCell)
 library(qs2)
-source(here("Brain-Met_V2/functions.R"))
+library(future)
+plan(multisession, workers = 7)
+options(future.globals.maxSize = 100000 * 1024^2)
+# source(here("Brain-Met_V2/functions.R"))
+source(here('Glioma_Project/Scripting/utils.R'))
+source(here('Glioma_Project/Scripting/functions.R'))
 # source(here("External_data/Fastq_processing/metadata_functions.R"))
 ```
 
@@ -101,8 +106,66 @@ seurat_obj@meta.data$file_name %>% unique()
 (seurat_obj$cell_het_paper_id == 'ODG-7') %>% table() # Strange
 ```
 
-```{r}
-seurat_obj
+```{r cleaning the objects}
+p <- VlnPlot(seurat_obj, features = c('nCount_RNA','nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
+# pdf(here('Glioma_Project/04_figs/00Test.pdf'), width= 15, height = 20)
+# p
+# dev.off()
+Idents(seurat_obj) <- 'Ann_lvl_2'
+Myeloid_anns <- c("Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active", "BAMs", "TAMs", "Ma-Inflam", "Ma-IFN", "Ma-Mt+", "Mono-Classic","Myeloid_Prolif","DCs_CD1C+","pDCs",'Mast-cells')
+T_anns <- c('CD8+_TNFSF9','CD8+_Cytotoxic','CD8+ Eff-Exh','CD4+ cm','CD4+ Tfh','Tregs','T-IFN','T_Prolif','MAIT-cells','NK')
+seurat_obj_M <- subset(x = seurat_obj, idents = Myeloid_anns, invert = F)
+seurat_obj_T <- subset(x = seurat_obj, idents = T_anns, invert =F)
+
+obj <- seurat_obj_T
+reduction_name <- 'T'
+samples_to_use <- obj@meta.data %>% group_by(sample_name) %>% summarise(count = n()) %>% filter(count> 1) %>% select(sample_name) %>%unlist(as.vector(.))# as.vector()
+obj <- subset(obj, subset = sample_name %in% samples_to_use)
+obj[["RNA"]] <- split(obj[["RNA"]], f = obj@meta.data[["sample_name"]])
+obj <- FindVariableFeatures(obj, selection.method = 'vst', nfeatures = 1000, verbose = F)
+VariableFeatures(obj) <- .remove_VDJ(VariableFeatures(obj))
+obj <- ScaleData(object = obj, features = VariableFeatures(obj), verbose = FALSE)
+obj <- RunPCA(
+        object = obj, features = VariableFeatures(obj),
+        nfeatures.print = 5, ndims.print = 1:2,
+        reduction.name = paste0("pca_", reduction_name),
+        npcs = 100
+    )
+# p1 <-.seurat_dimplot(obj, reduction = 'pca_T',label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) + theme(legend.position = 'none')
+# p1 <-DimPlot(obj, reduction = 'pca_T',dims = c(3,4),label = T,group = 'Ann_lvl_2', pt.size = 1) + theme(legend.position = 'none')
+ElbowPlot(obj, reduction = paste0("pca_", reduction_name), ndims = 100)
+VizDimLoadings(obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 15)
+n_PCS <- 20
+obj <- RunPCA(
+        object = obj, features = VariableFeatures(obj),
+        nfeatures.print = 5, ndims.print = 1:2,
+        reduction.name = paste0("pca_", reduction_name),
+        npcs = n_PCS
+    )
+
+obj <- IntegrateLayers(
+            object = obj, method = HarmonyIntegration,
+            orig.reduction = paste0("pca_", reduction_name), new.reduction = paste0("harmony_pca.", reduction_name),
+            verbose = TRUE
+        )
+obj <- FindNeighbors(obj, reduction = paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS))
+res_values <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.5)
+obj <- FindClusters(obj, resolution = res_values, algorithm = clustering[2])
+obj <- RunUMAP(obj, reduction =  paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS), reduction.name =  paste0("harmony_umap.", reduction_name))
+obj <- JoinLayers(obj)
+
+
+
+p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
+resolution_columns <- grep("^RNA_snn_res\\.",
+    colnames(obj@meta.data),
+    value = TRUE
+)
+p2 <- .seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name), group = resolution_columns, label = TRUE) & NoLegend()
+p1 + p2
+# p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'sample_name', pt.size = 1) + theme(legend.position = 'none')
+
+
 ```
 
 # To Do
@@ -114,12 +177,43 @@ or pseudobulk only myeloid per patient and score at a pseudobulk level (I would 
 then you can apply a max rank sum test on the score per patient between groups (disease/IDH-status...).
 
 ```{r pro anti sign}
+immune_markers
+gene_list <- list(
+    inflammatory = c("CCL4", "IL1B", "CCL3", "RELB", "ICAM1", "TNFAIP3"), #  Juan microglia paper
+    Anti_inflammatory = c("CD163", "SELENOP", "MRC1") # Juan microglia paper
+)
 
+# old <- list(
+#   BD = c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4"),
+#   MG = c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
+  # Mast = c("IL1RL1", "HDC", "TNFSF10", "FGL2", "IL17RB", "CCL2", "CSF1", "IL13"),
+  # pDCs = c("GZMB", "IGJ", "SERPINF1", "ITM2C", "IRF7", "TCF4", "BCL11A", "LILRA4", "MZB1", "DERL3", "IL3RA", "ZFAT", "NRP1", "CLEC4C", "IRF8", "SLC15A4", "BLNK"),
+  # DC_general = c("CD1C", "CLEC9A"),
+  # Prolif = c("UBE2C", "MKI67", "TOP2A"),
+  # Mg_homeostatic = c("PTPRC", "ITGAM", "P2RY12"),
+  # Mg_activated = c("CX3CR1", "GPR34", "FOXP2"),
+  # Mg_Reslike = c("PLCL1", "CEBPD", "VIM"),
+  # Mg_stress = c("HSPA1A", "HSPA1B", "SORCS2"),
+  # Mg_Phag = c("GPNMB", "RGCC", "PPARG"),
+  # Mg_Inflam = c("CCL4", "IL1B", "CCL3"),
+  # Mg_Inflam_ICAM1 = c("ICAM1", "RELB", "TNFAIP3"),
+  # Mg_INFg = c("IFNG", "IFIT2", "IFIT3", "STAT1"),
+  # BAM = c("F13A1", "LYVE1", "CD36"),
+  # BMD_Anti_Inflam = c("CD163", "SELENOP", "MRC1")
+# )
 ```
 
 ```{r residency sig}
 BD <-  c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4")
 MG <- c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
+```
+
+
+```{r computing signatures on subsets}
+
+seurat_obj <- AddModuleScore_UCell(seurat_obj,
+    features = gene_list
+)
 
 ```
 
@@ -130,3 +224,4 @@ and I would definitely remove the bad quality and the Hb+ cells as they will onl
 Plus let's try to figure out what this mixed population is (doublets? proliferative?),
 otherwise I would also remove them as it is not providing any helpful information. 
 You can also run scCODA to validate these findings both for the diseases and the IDH mut/wt.
+

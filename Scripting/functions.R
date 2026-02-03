@@ -574,8 +574,9 @@ plotting_PCA_regress <- \(df_corr, limit_n = 0.5){
     }
     if (vf[4]) {
         ## Exclude VDJ genes
-        require(scRepertoire)
-        obj <- scRepertoire::quietVDJgenes(obj)
+        # require(scRepertoire)
+        # obj <- scRepertoire::quietVDJgenes(obj)
+        VariableFeatures(obj) <- .remove_VDJ(VariableFeatures(obj))
     }
     cat(paste0("###################", "\n"))
     cat("FindVariableFeatures complete")
@@ -879,4 +880,9 @@ plotting_PCA_regress <- \(df_corr, limit_n = 0.5){
     ggsave(filename = here(fig_path, "milo", paste0("miloR_umap", contrast.1, "_", k, ".png")), plot = output_figure)
     ggsave(filename = here(fig_path, "milo", paste0("miloR_beeswarm", contrast.1, "_", k, ".png")), plot = output_figure_2)
     return(da_results)
+}
+.remove_VDJ <- \(genes){
+    genes <- genes[!grepl("^TR[ABDG][VDJ][^D]", genes, ignore.case = TRUE)]
+    genes <- genes[grepl("^IG[HLK][VDJCAGM]", genes, ignore.case = TRUE) & toupper(genes) == "JCHAIN"  |  !genes %in% c(pseudo_genes_BCR)]
+    return(genes)
 }
