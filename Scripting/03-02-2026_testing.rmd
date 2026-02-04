@@ -92,6 +92,12 @@ feature_vec_chosen <- feature_vec_overall
 seurat_obj_path <- ifelse(!is.null(sub_dir), here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
 seurat_obj <- qs_read(seurat_obj_path)
 .size(seurat_obj)
+#https://www.nature.com/articles/s41556-025-01840-5
+
+# seurat_obj@meta.data  <- seurat_obj@meta.data %>%
+#     mutate(Ann_lvl_2 = recode(Ann_lvl_2, `Ma-Inflam` = 'Ma_SLC2A1+' ))
+# seurat_obj@meta.data$Ann_lvl_2 %>% table()
+# qs_save(seurat_obj, seurat_obj_path)
 ```
 
 ```{r, eval = F}
@@ -114,7 +120,7 @@ p <- VlnPlot(seurat_obj, features = c('nCount_RNA','nFeature_RNA','percent_mt'),
 Idents(seurat_obj) <- 'Ann_lvl_2'
 seurat_obj$log_nCount_RNA <- log(seurat_obj$nCount_RNA, base = 10)
 seurat_obj$log_nFeature_RNA <- log(seurat_obj$nFeature_RNA, base = 10)
-Myeloid_anns <- c("Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active", "BAMs", "TAMs", "Ma-Inflam", "Ma-IFN", "Ma-Mt+", "Mono-Classic","Myeloid_Prolif","DCs_CD1C+","pDCs",'Mast-cells')
+Myeloid_anns <- c("Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active", "BAMs", "TAMs", "Ma_SLC2A1+", "Ma-IFN", "Ma-Mt+", "Mono-Classic","Myeloid_Prolif","DCs_CD1C+","pDCs",'Mast-cells')
 T_anns <- c('CD8+_TNFSF9','CD8+_Cytotoxic','CD8+ Eff-Exh','CD4+ cm','CD4+ Tfh','Tregs','T-IFN','T_Prolif','MAIT-cells','NK')
 seurat_obj_M <- subset(x = seurat_obj, idents = Myeloid_anns, invert = F)
 seurat_obj_T <- subset(x = seurat_obj, idents = T_anns, invert =F)
@@ -280,11 +286,10 @@ BD <-  c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A",
 MG <- c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
 gene_list <- list(
     'Systemic inflammatory' = c('IL1B', 'IL1A', 'CCL2', 'TNF', 'OSM', 'CXCL8','CD83','CCL4','CCL3','CD74'),
-    'Microglial inflammatory' = c('CXCR4', 'CXCL12', 'CCL3', 'CCL4', 'CX3CR1', 'RHOB', 'JUN', 'KLF2', 'EGR1', 'PDK4', 'P2RY13','ICAM1','RELB','TNFAIP3'),
-    # 'Complement immunosuppressive' = c('C1QA',' C1QB', 'C1QC', 'C3', 'VSIG4', 'CD163','SELENOP'),
-    'Scavenger immunosuppressive' = c('MRC1','MSR1','CD163', 'LYVE1',' COLEC12', 'STAB1','NRP1', 'RNASE1', 'CTSB','VSIG4','SELENOP'),
-    'Resident signature' = MG,
-    'Infiltrating signature' = BD
+    'Microglial inflammatory' = c('CXCR4', 'CXCL12', 'CCL3', 'CCL5', 'CX3CR1', 'RHOB', 'JUN', 'KLF2', 'EGR1', 'PDK4', 'P2RY13','ICAM1','RELB','TNFAIP3'),
+    'Anti_Inflam' = c('MRC1','MSR1','CD163', 'LYVE1',' COLEC12', 'STAB1','NRP1', 'RNASE1', 'CTSB','VSIG4','SELENOP'),
+    'Resident' = MG,
+    'Infiltrating' = BD
 )
 
 #  (or CD206 CD204),
@@ -337,6 +342,35 @@ resolution_columns <- grep("^RNA_snn_res\\.",
     value = TRUE
 )
 qs_save(obj,here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+
+Idents(obj) <- 'Ann_lvl_2'
+marker_list <- FindAllMarkers(
+    object = obj,
+    only.pos = F,
+    min.pct = 0.25,
+    logfc.threshold = 0.25
+)
+p <- .marker_plot(obj,marker_list)
+p1 <- VlnPlot(obj, features = c('log_nCount_RNA','log_nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
+p2 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation M_M cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
+p3 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = Mgenes) & NoLegend()
+p4 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = 'SLC2A1') & NoLegend()
+plot <- p1 + p2
+ggsave(here('Glioma_Project/04_figs/markers_M_M_dot.pdf'),plot = p, width = 15, height = 4.5)
+ggsave(here('Glioma_Project/04_figs/violin_M_M.pdf'), width = 12, height = 10, plot = plot)
+ggsave(here('Glioma_Project/04_figs/markers_M_M.pdf'), width = 15, height = 30, plot = p3)
+pdf(here('Glioma_Project/04_figs',paste0('Overview_figures',reduction_name),'.pdf'))
+p
+plot
+p3
+p4 + p2
+dev.off()
+
+# M1 <- c('FCGR2B','FCGR1A','CD68','CD80','CD86' ) #CD32, CD64, CD68, CD80, and CD86, 
+# feature_vec <- c('IL1A','IL1B','IL6','IL4',"TNF",'CCL2',"CCL3","CCL5",'CXCL1',"CXCL2","IFNG")
+# p5 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = feature_vec) & NoLegend()
+# p6 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = M1) & NoLegend()
+
 ```
 
 ```{r}
@@ -347,8 +381,8 @@ p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),la
 p2 <- FeaturePlot(obj,reduction = paste0('harmony_umap.',reduction_name),features = Ucell_cols[14:18], raster = T) & NoAxes()
 DotPlot(obj, features = Ucell_cols[14:18], group.by='Ann_lvl_2',cluster.idents = T) + x_axis_theme
 obj$`inf-res` <- (obj$`Infiltrating signature_UCell` - obj$`Resident signature_UCell`)
-p <- VlnPlot(obj, features = c(Ucell_cols[14:18],'inf-res'), group.by = 'Ann_lvl_2', ncol = 2,raster = T) + x_axis_theme
-p3 <- VlnPlot(obj, features ='inf-res', group.by = 'Ann_lvl_2', ncol = 2,raster = T) + x_axis_theme
+p <- VlnPlot(obj, features = c(Ucell_cols[14:18],'inf-res'), group.by = 'Ann_lvl_2', ncol = 2,raster = T, pt.size = 0) + x_axis_theme
+p3 <- VlnPlot(obj, features ='inf-res', group.by = 'Ann_lvl_2', ncol = 2,raster = T, pt.size = 0) + x_axis_theme
 model <- lm(`Microglial inflammatory_UCell` ~  `Systemic inflammatory_UCell`, data = obj@meta.data)
 p4 <- ggplot(data = obj@meta.data, mapping = aes(x = `Microglial inflammatory_UCell`, y = `Systemic inflammatory_UCell`, colour = Ann_lvl_1H)) + ggrastr::rasterise(geom_point()) + 
     annotate('text', x = 0.1,y = 0.8, label = paste0('R-squared: ', as.character(round(summary(model)$r.squared,2))))
@@ -358,9 +392,6 @@ p
 p3
 p4
 dev.off()
-
-
-summary(model)$r.squared
 ```
 
 
