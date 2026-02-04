@@ -41,7 +41,7 @@ library(patchwork)
 library(UCell)
 library(qs2)
 library(future)
-plan(multisession, workers = 7)
+plan(sequential)
 options(future.globals.maxSize = 100000 * 1024^2)
 # source(here("Brain-Met_V2/functions.R"))
 source(here('Glioma_Project/Scripting/utils.R'))
@@ -118,7 +118,9 @@ Myeloid_anns <- c("Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_a
 T_anns <- c('CD8+_TNFSF9','CD8+_Cytotoxic','CD8+ Eff-Exh','CD4+ cm','CD4+ Tfh','Tregs','T-IFN','T_Prolif','MAIT-cells','NK')
 seurat_obj_M <- subset(x = seurat_obj, idents = Myeloid_anns, invert = F)
 seurat_obj_T <- subset(x = seurat_obj, idents = T_anns, invert =F)
+```
 
+```{r T cells}
 obj <- seurat_obj_T
 reduction_name <- 'T'
 samples_to_use <- obj@meta.data %>% group_by(sample_name) %>% summarise(count = n()) %>% filter(count> 1) %>% select(sample_name) %>%unlist(as.vector(.))# as.vector()
@@ -187,10 +189,12 @@ marker_list <- FindAllMarkers(
 ggsave(here('Glioma_Project/04_figs/markers_T_dot.pdf'), width = 12, height = 4.5)
 p1 <- VlnPlot(obj, features = c('log_nCount_RNA','log_nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
 p2 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
-p3 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = features) & NoLegend()
+p3 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = feature_vec_T) & NoLegend()
 plot <- p1 + p2
 ggsave(here('Glioma_Project/04_figs/violin_T.pdf'), width = 12, height = 10, plot = plot)
 ggsave(here('Glioma_Project/04_figs/markers_T.pdf'), width = 15, height = 30, plot = p3)
+
+qs_save(obj,here('Glioma_Project/03_seurat_objects/Processed_T.qs2'))
 ```
 
 ```{r myeloid}
@@ -238,22 +242,23 @@ p2 <- .seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name), 
 p1 + p2 # quick vis
 
 
-Idents(obj) <- 'Ann_lvl_2'
-marker_list <- FindAllMarkers(
-    object = obj,
-    only.pos = F,
-    min.pct = 0.25,
-    logfc.threshold = 0.25
-)
+# Idents(obj) <- 'Ann_lvl_2'
+# marker_list <- FindAllMarkers(
+#     object = obj,
+#     only.pos = F,
+#     min.pct = 0.25,
+#     logfc.threshold = 0.25
+# )
 
-.marker_plot(obj,marker_list)
-ggsave(here('Glioma_Project/04_figs/markers_M_dot.pdf'), width = 12, height = 4.5)
-p1 <- VlnPlot(obj, features = c('log_nCount_RNA','log_nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
-p2 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
-p3 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = features) & NoLegend()
-plot <- p1 + p2
-ggsave(here('Glioma_Project/04_figs/violin_M.pdf'), width = 12, height = 10, plot = plot)
-ggsave(here('Glioma_Project/04_figs/markers_M.pdf'), width = 15, height = 30, plot = p3)
+# .marker_plot(obj,marker_list)
+# ggsave(here('Glioma_Project/04_figs/markers_M_dot.pdf'), width = 15, height = 4.5)
+# p1 <- VlnPlot(obj, features = c('log_nCount_RNA','log_nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
+# p2 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
+# p3 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = Mgenes) & NoLegend()
+# plot <- p1 + p2
+# ggsave(here('Glioma_Project/04_figs/violin_M.pdf'), width = 12, height = 10, plot = plot)
+# ggsave(here('Glioma_Project/04_figs/markers_M.pdf'), width = 15, height = 30, plot = p3)
+qs_save(obj,here('Glioma_Project/03_seurat_objects/Processed_M.qs2'))
 
 ```
 
@@ -264,13 +269,153 @@ signatures only on myeloid cells to compare the three diseases but you could als
 Then if you want to add significance you could either average the scores by patient (only myeloid) 
 or pseudobulk only myeloid per patient and score at a pseudobulk level (I would prefer this approach), 
 then you can apply a max rank sum test on the score per patient between groups (disease/IDH-status...).
-
 ```{r pro anti sign, eval = F}
 immune_markers
+# Four principal immunomodulatory programs
+# https://www.nature.com/articles/s41586-025-08633-8
+# Programs, origins and immunomodulatory functions of myeloid cells in glioma
+# Cel reports medicine Juan nieto: 
+# Tumor heterogeneity and tumor-microglia interactions in primary and recurrent IDH1-mutant gliomass
+BD <-  c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4")
+MG <- c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
 gene_list <- list(
-    inflammatory = c("CCL4", "IL1B", "CCL3", "RELB", "ICAM1", "TNFAIP3"), #  Juan microglia paper
-    Anti_inflammatory = c("CD163", "SELENOP", "MRC1") # Juan microglia paper
+    'Systemic inflammatory' = c('IL1B', 'IL1A', 'CCL2', 'TNF', 'OSM', 'CXCL8','CD83','CCL4','CCL3','CD74'),
+    'Microglial inflammatory' = c('CXCR4', 'CXCL12', 'CCL3', 'CCL4', 'CX3CR1', 'RHOB', 'JUN', 'KLF2', 'EGR1', 'PDK4', 'P2RY13','ICAM1','RELB','TNFAIP3'),
+    # 'Complement immunosuppressive' = c('C1QA',' C1QB', 'C1QC', 'C3', 'VSIG4', 'CD163','SELENOP'),
+    'Scavenger immunosuppressive' = c('MRC1','MSR1','CD163', 'LYVE1',' COLEC12', 'STAB1','NRP1', 'RNASE1', 'CTSB','VSIG4','SELENOP'),
+    'Resident signature' = MG,
+    'Infiltrating signature' = BD
 )
+
+#  (or CD206 CD204),
+```
+
+```{r subset M}
+seurat_obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_M.qs2')))
+seurat_obj_subset <- subset(seurat_obj, subset = Ann_lvl_1H %in% c('Microglia','Macrophage','Monocyte','Myeloid_Prolif'))
+seurat_obj_subset <- AddModuleScore_UCell(
+    seurat_obj_subset,
+    features = gene_list)
+reduction_name <- 'M_M'
+obj <- seurat_obj_subset
+samples_to_use <- obj@meta.data %>% group_by(sample_name) %>% summarise(count = n()) %>% filter(count> 1) %>% select(sample_name) %>%unlist(as.vector(.))# as.vector()
+obj <- subset(obj, subset = sample_name %in% samples_to_use)
+obj[["RNA"]] <- split(obj[["RNA"]], f = obj@meta.data[["sample_name"]])
+obj <- FindVariableFeatures(obj, selection.method = 'vst', nfeatures = 1000, verbose = F)
+VariableFeatures(obj) <- .remove_VDJ(VariableFeatures(obj))
+obj <- ScaleData(object = obj, features = VariableFeatures(obj), verbose = FALSE)
+obj <- RunPCA(
+        object = obj, features = VariableFeatures(obj),
+        nfeatures.print = 5, ndims.print = 1:2,
+        reduction.name = paste0("pca_", reduction_name),
+        npcs = 100
+    )
+ElbowPlot(obj, reduction = paste0("pca_", reduction_name), ndims = 100)
+VizDimLoadings(obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 15)
+n_PCS <- 20
+obj <- RunPCA(
+        object = obj, features = VariableFeatures(obj),
+        nfeatures.print = 5, ndims.print = 1:2,
+        reduction.name = paste0("pca_", reduction_name),
+        npcs = n_PCS
+    )
+
+obj <- IntegrateLayers(
+            object = obj, method = HarmonyIntegration,
+            orig.reduction = paste0("pca_", reduction_name), new.reduction = paste0("harmony_pca.", reduction_name),
+            verbose = TRUE
+        )
+obj <- FindNeighbors(obj, reduction = paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS))
+res_values <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.5)
+obj <- FindClusters(obj, resolution = res_values, algorithm = clustering[2])
+obj <- RunUMAP(obj, reduction =  paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS), reduction.name =  paste0("harmony_umap.", reduction_name))
+obj <- JoinLayers(obj)
+
+p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
+resolution_columns <- grep("^RNA_snn_res\\.",
+    colnames(obj@meta.data),
+    value = TRUE
+)
+qs_save(obj,here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+```
+
+```{r}
+obj@meta.data %>% colnames()
+Ucell_cols <- colnames(obj@meta.data)[obj@meta.data %>% colnames() %>% grep('UCell',.)]
+.feature_plot(obj,reduction = paste0('harmony_umap.',reduction_name),features = Ucell_cols)
+p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
+p2 <- FeaturePlot(obj,reduction = paste0('harmony_umap.',reduction_name),features = Ucell_cols[14:18], raster = T) & NoAxes()
+DotPlot(obj, features = Ucell_cols[14:18], group.by='Ann_lvl_2',cluster.idents = T) + x_axis_theme
+obj$`inf-res` <- (obj$`Infiltrating signature_UCell` - obj$`Resident signature_UCell`)
+p <- VlnPlot(obj, features = c(Ucell_cols[14:18],'inf-res'), group.by = 'Ann_lvl_2', ncol = 2,raster = T) + x_axis_theme
+p3 <- VlnPlot(obj, features ='inf-res', group.by = 'Ann_lvl_2', ncol = 2,raster = T) + x_axis_theme
+model <- lm(`Microglial inflammatory_UCell` ~  `Systemic inflammatory_UCell`, data = obj@meta.data)
+p4 <- ggplot(data = obj@meta.data, mapping = aes(x = `Microglial inflammatory_UCell`, y = `Systemic inflammatory_UCell`, colour = Ann_lvl_1H)) + ggrastr::rasterise(geom_point()) + 
+    annotate('text', x = 0.1,y = 0.8, label = paste0('R-squared: ', as.character(round(summary(model)$r.squared,2))))
+pdf(here('Glioma_Project/04_figs/00Test.pdf'), width = 15, height = 10)
+p1 + p2 
+p
+p3
+p4
+dev.off()
+
+
+summary(model)$r.squared
+```
+
+
+
+```{r computing inflamm scores}
+reduction_name <- 'M_M'
+seurat_obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+
+
+pseudo_seurat <- AggregateExpression(seurat_obj_subset, assays = "RNA", return.seurat = T, group.by = c("sample_name",'Ann_lvl_1H'))
+df_list <- lapply(names(gene_list), \(.){data.frame('source' = .,'target' = gene_list[[.]],'mor' = 1)})
+net <- do.call(rbind,df_list)
+mat <- pseudo_seurat[["RNA"]]$counts
+net %>% head()
+res_mlm <- decoupleR::run_mlm(
+    mat = mat,
+    network = net,
+    .source = "source",
+    .target = "target",
+    center = FALSE
+)
+mat_mlm <- res_mlm %>%
+        tidyr::separate(col = condition, sep = "_", into = c("sample_name", "Celltype"), remove = FALSE) %>%      
+        decoupleR::pivot_wider_profile(id_cols = source, 
+                                           names_from = condition, 
+                                           values_from = score) 
+maxs <- apply(mat_mlm,2, max)
+mins <- apply(mat_mlm, 2, min)
+scaled_m <- scale(mat_mlm, center = mins, scale = maxs - mins)
+
+colors <- rev(RColorBrewer::brewer.pal(n = 11, name = "RdBu"))
+colors.use <- grDevices::colorRampPalette(colors = colors)(100)
+
+
+mat_mlm %>% head()
+# Heatmap
+pheatmap::pheatmap(mat = t(scaled_m[,1:30]),
+                   color = colors.use,
+                   border_color = "white",
+                   cluster_rows = FALSE,
+                   cluster_cols = FALSE,
+                   cellwidth = 20,
+                   cellheight = 20,
+                   treeheight_row = 0,
+                   treeheight_col = 0)
+
+plot_df <- res_mlm %>% filter(p_value < 0.05) %>%
+        tidyr::separate(col = condition, sep = "_", into = c("sample_name", "Celltype"), remove = FALSE)
+
+plot_df %>% ggplot(mapping = aes(x = Celltype, y = score)) + geom_boxplot() + facet_wrap(~source) + theme_bw() + x_axis_theme 
+ggsave(here('Glioma_Project/04_figs/DecouplR_results.pdf'))
+```
+
+```{r old}
+
 
 # old <- list(
 #   BD = c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4"),

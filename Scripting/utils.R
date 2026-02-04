@@ -2,6 +2,9 @@ exc_path <- here("Glioma_Project/01_data/Excel")
 rmd_path <- here("Glioma_Project/02_knits/figs")
 obj_path <- here("Glioma_Project/01_data")
 fig_path <- here("Glioma_Project/04_figs")
+blank <- element_blank()
+x_axis_theme <- theme(axis.text.x = element_text(size = 11, angle = 30, hjust = 1, color = "black"))
+y_axis_theme <- theme(axis.text.y = element_text(size = 11, color = "black"))
 
 batch_cols <- c(
     "tumour_full", "tumour_abbreviated", "grade", "Cell_Type", "Cell_Subtype", "sample_name", "IDH_status",

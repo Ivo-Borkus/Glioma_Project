@@ -1,0 +1,334 @@
+---
+title: "Analysis of singlecellRNAseq data by 10x"
+author: "Ivo Borkus"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:  
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: t rue
+params:
+    dataset_name: "Lee"
+    cell_type: "T_cells"
+
+---
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/scratch_isilon/groups/singlecell/iborkus/Projects/brain_met") # nolint
+knitr::opts_chunk$set(warning = FALSE, fig.width = 20, fig.height = 20)
+```
+
+
+# Loading libraries and setting directories
+```{R loading libraries, include = F, echo = T}
+library(Seurat)
+
+# plotting and data science packages
+library(tidyverse)
+library(cowplot)
+library(patchwork)
+
+# co-expression network analysis packages:
+library(WGCNA)
+library(hdWGCNA)
+library(knitr)
+# using the cowplot theme for ggplot
+theme_set(theme_cowplot())
+
+library(decoupleR)
+library(GSVA)
+
+# set random seed for reproducibility
+setwd("/scratch_isilon/groups/singlecell/iborkus/Projects/brain_met")
+source("02_scripts/101_processing_external_datasets/qc_functions.R")
+set.seed(1123)
+# optionally enable multithreading
+enableWGCNAThreads(nThreads = 8)
+figure_output <- "02_scripts/overview_analysis/03_Figure/final_figs/"
+```
+
+
+
+```{R loading prepped seurat}
+reference_dataset <- readRDS(file = paste0("03_processing/101_processing_exernal/data/optimising_hdWGCNA/Inhous_hvf_5000_nnp_25_max_shared_10_seurat_processed_final_annotated.rds"))
+```
+
+```{R settings}
+figure_output <- "02_scripts/presentation_figures/"
+cell_type_of_interest <- "T_cells"
+col_cell_type <- "generalised_ann_1"
+wgcna_name_ref <- GetActiveWGCNAName(reference_dataset)
+wgcna_name_query <- "Subset_analysis"
+```
+
+
+```{R}
+datasets <- c("Gonzalez", "Inhouse", "Lee", "Biermann")
+
+seurat_list_preserved <- lapply(datasets, function(dataset_to_use) {
+    seurat_query <- readRDS(file = paste0("03_processing/101_processing_exernal/data/optimising_hdWGCNA/query_processed_", dataset_to_use, ".rds"))
+    seurat_query
+})
+names(seurat_list_preserved) <- datasets
+```
+
+```{R}
+# Merging
+seurat_list_preserved[["Biermann"]]$sample <- seurat_list_preserved[["Biermann"]]$ID
+seurat_list_preserved[["Biermann"]]$primary <- "Melanoma"
+seurat_list_preserved[["Biermann"]]$treatment <- "Naive"
+seurat_list_preserved[["Biermann"]]$df <- "Biermann"
+
+###
+
+###
+seurat_list_preserved[["Gonzalez"]]@meta.data$primary <- sapply(seurat_list_preserved[["Gonzalez"]]$sample_names, function(X) {
+    string <- strsplit(X, split = "_")
+    primary <- string[[1]][1]
+    primary
+})
+seurat_list_preserved[["Gonzalez"]]@meta.data$primary <- ifelse(seurat_list_preserved[["Gonzalez"]]@meta.data$primary == "Melan", "Melanoma", as.character(seurat_list_preserved[["Gonzalez"]]@meta.data$primary))
+seurat_list_preserved[["Gonzalez"]]@meta.data <- seurat_list_preserved[["Gonzalez"]]@meta.data %>% mutate(treatment = case_when(
+    sample_names %in% c("Melan_2", "Melan_3", "Lung_3") ~ "Naive",
+    TRUE ~ "Chemo"
+))
+seurat_list_preserved[["Gonzalez"]]$sample <- seurat_list_preserved[["Gonzalez"]]$sample_names
+seurat_list_preserved[["Gonzalez"]]$df <- "Gonzalez"
+
+###
+
+seurat_list_preserved[["Lee"]]@meta.data$primary <- "Lung"
+seurat_list_preserved[["Lee"]]@meta.data$treatment <- "Naive"
+seurat_list_preserved[["Lee"]]@meta.data$sample <- seurat_list_preserved[["Lee"]]@meta.data$Sample
+seurat_list_preserved[["Lee"]]@meta.data$df <- "Kim"
+
+
+seurat_list_preserved[["Inhouse"]]@meta.data$sample <- paste0(seurat_list_preserved[["Inhouse"]]@meta.data$primary_sample, "_Inhouse")
+
+seurat_list_preserved[["Inhouse"]]@meta.data$primary %>% table()
+seurat_list_preserved[["Inhouse"]]@meta.data$sample %>% table()
+seurat_list_preserved[["Inhouse"]]@meta.data$treatment <- "SRS"
+seurat_list_preserved[["Inhouse"]]@meta.data$df <- "Inhouse"
+
+
+
+add.cell.ids <- sapply(seurat_list_preserved, function(x) unique(x$df))
+seurat_obj <- merge(seurat_list_preserved[[1]],
+    y = seurat_list_preserved[2:length(seurat_list_preserved)],
+    add.cell.ids = add.cell.ids
+)
+```
+
+```{R}
+# pseudobulk the counts based on -donor-
+pseudo_seurat <- AggregateExpression(seurat_obj, assays = "RNA", return.seurat = T, group.by = c("sample", "df", "primary", "treatment"))
+
+modules <- GetModules(reference_dataset)
+if (!is.factor(modules$module)) {
+    modules$module <- as.factor(modules$module)
+}
+
+gene_names <- modules$gene_name
+modules <- modules[rownames(modules) %in% gene_names, ]
+
+genes <- list()
+for (cur_mod in unique(modules$module)) {
+    print(cur_mod)
+    mods_df <- modules[modules$module == cur_mod, ]
+    print(head(mods_df))
+    df_sorted <- mods_df[order(mods_df[[paste0("kME_", cur_mod)]], decreasing = TRUE), ]
+    df_sorted %>% select(gene_name, module, paste0("kME_", cur_mod)) -> df_sorted
+    colnames(df_sorted) <- c("target", "source", "mor")
+    genes[[cur_mod]] <- df_sorted
+}
+```
+
+```{R preparing for decouplr}
+combined_df <- bind_rows(genes)
+combined_df <- combined_df[, c(2, 1, 3)]
+net <- combined_df
+mat <- pseudo_seurat[["RNA"]]$counts
+```
+
+```{R run decouplr}
+res_gsva <- decoupleR::run_gsva(
+    mat = mat,
+    network = net,
+    .source = "source",
+    .target = "target"
+)
+```
+
+```{R}
+your_seurat_object <- AddModuleScore_UCell(
+    pseudo_seurat,
+    features = trimmed_gene_sets,
+    # Other parameters like maxRank, chunk.size, etc., can be adjusted
+)
+
+mods <- names(genes)[c(1, 3:length(names(genes)))] # excluding grey modules (noise)
+
+plot_df <- your_seurat_object@meta.data
+group_parameter <- "primary_general"
+split_parameter <- "treatment"
+
+your_seurat_object$treatment
+prim_vec <- c("Lung", "Melanoma", "Colon")
+plot_df$primary_general <- ifelse(plot_df$primary %in% prim_vec,
+    plot_df$primary,
+    "Other"
+)
+plot_df$primary
+unique(plot_df$df)
+val_to_num <- setNames(seq_along(unique(plot_df$df)) + 20, unique(plot_df$df))
+val_to_num["Gonzalez"]
+# Use apply() to generate the shapes vector
+plot_df$shapes <- apply(plot_df["df"], 1, function(x) val_to_num[x])
+shapes <- NULL
+plot_df$shapes <- as.factor(plot_df$shapes)
+plot_list <- list()
+library(ggpubr)
+for (module in paste0(mods, "_UCell")) {
+    print(module)
+    p <- plot_df %>% ggplot(aes(
+        x = !!sym(split_parameter), y = !!sym(module)
+    )) +
+        ggbeeswarm::geom_quasirandom(
+            aes(color = primary_general, shape = df, fill = primary_general),
+            method = "pseudorandom",
+            size = 2.5, width = 0.25
+        ) +
+        scale_shape_manual(values = val_to_num) # legend will show names, points get 1,2,3...
+    p <- p +
+        geom_boxplot(
+            outlier.shape = NA,
+            alpha = 0.1,
+            width = 0.3
+
+            # notch = box_notch
+        )
+    p <- p + stat_compare_means()
+
+
+    plot_list[[module]] <- p
+}
+# png(file = "02_scripts/overview_analysis/03_Figure/figs/barplot_pseudobulk_final.png", width = 10, height = 12, units = "in", res = 600)
+wrap_plots(plot_list, ncol = 2) + plot_layout(guides = "collect")
+# dev.off()
+```
+
+
+```{R printing plots in a correct way}
+# set up the plot
+p <- plot_df %>% ggplot(aes(y = get(score_col), x = get(group_by)))
+
+# plot the points on the bottom:
+p <- p +
+    ggrastr::rasterise(ggbeeswarm::geom_quasirandom(
+        aes(color = get(signature_col)),
+        method = "pseudorandom",
+        size = point_size
+    ), dpi = raster_dpi)
+
+# add the box
+p <- p +
+    geom_boxplot(
+        outlier.shape = NA,
+        alpha = box_alpha,
+        width = box_width,
+        fill = box_fill,
+        notch = box_notch
+    )
+```
+
+
+
+
+```{R}
+modules <- GetModules(reference_dataset)
+if (!is.factor(modules$module)) {
+    modules$module <- as.factor(modules$module)
+}
+
+overlap_proportion <- 0.5
+mods <- as.character(unique(modules$module))
+mod_props <- unlist(lapply(mods, function(x) {
+    cur_mod <- subset(modules, module == x)
+    sum(cur_mod$gene_name %in% rownames(pseudo_seurat)) / nrow(cur_mod)
+}))
+
+
+
+mods_keep <- mods[mod_props >= overlap_proportion]
+mods_remove <- mods[mod_props < overlap_proportion]
+
+
+# only keep modules that have enough overlapping genes
+modules <- subset(modules, module %in% mods_keep) %>%
+    dplyr::mutate(module = droplevels(module))
+
+
+
+# get genes that overlap between WGCNA genes & seurat_obj genes:
+gene_names <- modules$gene_name
+genes_use <- intersect(gene_names, rownames(pseudo_seurat))
+
+# subset modules by genes in this seurat object:
+modules <- modules %>% subset(gene_name %in% genes_use)
+
+# setup new seurat obj for wgcna:
+if (!(wgcna_name_ref %in% names(pseudo_seurat@misc))) {
+    pseudo_seurat <- SetupForWGCNA(
+        pseudo_seurat,
+        wgcna_name = wgcna_name_ref,
+        features = genes_use
+    )
+}
+
+
+print("project modules")
+p
+
+pseudo_seurat <- ModuleEigengenes(
+    pseudo_seurat,
+    group.by.vars = "sample",
+    modules = modules,
+    # vars.to.regress = vars.to.regress,
+    scale.model.use = "linear",
+    wgcna_name = wgcna_name_ref,
+)
+```
+
+```{R}
+seurat_obj <- pseudo_seurat
+reduction_name <- "pseudo"
+# seurat_obj <- list_seurat[[list_name]]
+Idents(seurat_obj) <- "generalised_ann_1"
+features <- 2000
+# seurat_obj <- subset(x = seurat_obj, idents = cell_type_of_interest, invert = F)
+# seurat_obj[["RNA"]] <- split(seurat_obj[["RNA"]], f = seurat_obj@meta.data[["df"]])
+seurat_obj <- FindVariableFeatures(seurat_obj, selection.method = "vst", nfeatures = features, verbose = TRUE)
+hvf_info <- HVFInfo(seurat_obj)
+top_variable_genes <- hvf_info[order(hvf_info$variance.standardized, decreasing = TRUE), ]
+top_x_genes <- rownames(top_variable_genes)[1:features]
+VariableFeatures(seurat_obj) <- top_x_genes
+# seurat_obj <- ScaleData(object = seurat_obj, vars.to.regress = c("percent_mt"), features = top_x_genes, verbose = FALSE)
+seurat_obj <- RunPCA(
+    object = seurat_obj, nfeatures.print = 5, ndims.print = 1:2, reduction.name = paste0("pca_", reduction_name), npcs = 10
+)
+print(ElbowPlot(seurat_obj, reduction = paste0("pca_", reduction_name), ndims = 100))
+print(VizDimLoadings(seurat_obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 15))
+seurat_obj
+
+
+modules
+
+seurat_query <- ProjectModules(
+    seurat_obj = seurat_query,
+    seurat_ref = reference_dataset,
+    vars.to.regress = c("percent_mt"), # optionally regress covariates when running ScaleData
+    # group.by.vars = sample_col, # column in seurat_query to run harmony on
+    wgcna_name = wgcna_name_ref,
+    wgcna_name_proj = wgcna_name_ref,
+    assay = "RNA" # assay for query dataset
+)
+```
