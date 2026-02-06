@@ -275,7 +275,7 @@ signatures only on myeloid cells to compare the three diseases but you could als
 Then if you want to add significance you could either average the scores by patient (only myeloid) 
 or pseudobulk only myeloid per patient and score at a pseudobulk level (I would prefer this approach), 
 then you can apply a max rank sum test on the score per patient between groups (disease/IDH-status...).
-```{r pro anti sign, eval = F}
+```{r pro anti sign, eval = T}
 immune_markers
 # Four principal immunomodulatory programs
 # https://www.nature.com/articles/s41586-025-08633-8
@@ -291,9 +291,91 @@ gene_list <- list(
     'Resident' = MG,
     'Infiltrating' = BD
 )
+obj <- AddModuleScore_UCell(obj,
+    features = gene_list
+)
 
 #  (or CD206 CD204),
 ```
+
+```{r seurat manual processing}
+reduction_name <- 'M_M'
+obj <- seurat_obj_subset
+seurat_processing_manual <- \(obj, reduction_name){
+    block_label <-readline(prompt = "Insert Batch label: ")
+    block_label_null <- switch(toupper(block_label),'NULL' = NULL, block_label)
+    if (!is.null(block_label_null)){
+        harmony = T
+        block_label <- as.character(block_label)
+        obj[["RNA"]] <- split(obj[["RNA"]], f = obj@meta.data[[block_label]])
+        reduction_pca <- paste0("harmony_pca.", reduction_name)
+        reduction_umap <- paste0("umap.harmony.", reduction_name)
+    }   else {
+        reduction_pca <- paste0("pca_", reduction_name)
+        reduction_umap <- paste0("umap_", reduction_name)
+    }
+    norm <- as.logical(readline(prompt = 'Normalise? T or F: '))
+    if (norm){
+        obj <- NormalizeData(
+            object = obj,
+            normalization.method = 'LogNormalize',
+            scale.factor = as.numeric(10000)
+        )}
+
+    hvf_n <- as.numeric(readline(prompt = "Enter the number of HVF: "))
+    obj <- FindVariableFeatures(obj, selection.method = 'vst', nfeatures = hvf_n, verbose = F)
+    obj <- ScaleData(object = obj, features = VariableFeatures(obj), verbose = FALSE)
+    n_PCS <- 50
+    obj <- RunPCA(
+            object = obj, features = VariableFeatures(obj),
+            nfeatures.print = 5, ndims.print = 1:2,
+            reduction.name = paste0("pca_", reduction_name),
+            npcs = n_PCS
+        )
+    p1 <-ElbowPlot(obj, reduction = paste0("pca_", reduction_name), ndims = n_PCS)
+    p2 <- VizDimLoadings(obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 10)
+    print(wrap_plots(list(p1,p2)))
+    n_PCS <- as.numeric(readline(prompt = "n_PCS: "))
+    obj <- RunPCA(
+        object = obj, features = VariableFeatures(obj),
+        nfeatures.print = 5, ndims.print = 1:2,
+        reduction.name = paste0("pca_", reduction_name),
+        npcs = n_PCS
+    )    
+    print('running UMAP')
+    obj <- RunUMAP(obj, reduction =  paste0("pca_", reduction_name), dims = 1:as.numeric(n_PCS), reduction.name =  paste0("umap_", reduction_name))
+
+    if (harmony){
+        p1 <-.seurat_dimplot(obj, reduction = paste0("umap_", reduction_name),label = T, title = 'Blocking label',group = block_label, pt.size = 1) #+ theme(legend.position = 'none')
+        print("Running Harmony")
+        obj <- IntegrateLayers(
+            object = obj, method = HarmonyIntegration,
+            orig.reduction = paste0("pca_", reduction_name), new.reduction = reduction_pca,
+            verbose = TRUE
+        )
+        print('Generating Umap harmonised')
+        obj <- RunUMAP(obj, reduction =  reduction_pca, dims = 1:as.numeric(n_PCS), reduction.name =  reduction_umap)
+
+        p2 <-.seurat_dimplot(obj, reduction = reduction_umap,label = T, title = 'Blocking label',group = block_label, pt.size = 1) #+ theme(legend.position = 'none')
+        print(wrap_plots(p1 + p2))
+    }
+    obj <- FindNeighbors(obj, reduction = reduction_pca, dims = 1:as.numeric(n_PCS))
+    res_list <- list('1'= c(0.01,0.05,0.1,0.3),'2' = c(0.7,0.9,1.5),'3' = c(0.01,0.05,0.1,0.3, 0.5,0.7,0.9,1.5))
+    print(res_list)
+    res <- readline(prompt = 'Please insert clustering res to use: ')
+    res <- switch(toupper(res),'NULL' = NULL, res_list[[res]])
+    if (!is.null(res)){
+        print(paste("clustering with leiden and clustering resolutions: ", res))
+        obj <- FindClusters(obj, resolution = res, algorithm = 4) # Leiden
+    }
+    if (harmony){
+        obj <- JoinLayers(obj)
+    }
+    print(block_label,norm,hvf_n,n_PCS,res,reduction_name)
+    return(obj)
+}
+```
+
 
 ```{r subset M}
 seurat_obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_M.qs2')))
@@ -373,39 +455,44 @@ dev.off()
 
 ```
 
-```{r}
-obj@meta.data %>% colnames()
+```{r trying some signatures on UMAP}
+reduction_name <- 'M_M'
+obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
 Ucell_cols <- colnames(obj@meta.data)[obj@meta.data %>% colnames() %>% grep('UCell',.)]
 .feature_plot(obj,reduction = paste0('harmony_umap.',reduction_name),features = Ucell_cols)
 p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
 p2 <- FeaturePlot(obj,reduction = paste0('harmony_umap.',reduction_name),features = Ucell_cols[14:18], raster = T) & NoAxes()
 DotPlot(obj, features = Ucell_cols[14:18], group.by='Ann_lvl_2',cluster.idents = T) + x_axis_theme
-obj$`inf-res` <- (obj$`Infiltrating signature_UCell` - obj$`Resident signature_UCell`)
+obj$`inf-res` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
 p <- VlnPlot(obj, features = c(Ucell_cols[14:18],'inf-res'), group.by = 'Ann_lvl_2', ncol = 2,raster = T, pt.size = 0) + x_axis_theme
 p3 <- VlnPlot(obj, features ='inf-res', group.by = 'Ann_lvl_2', ncol = 2,raster = T, pt.size = 0) + x_axis_theme
 model <- lm(`Microglial inflammatory_UCell` ~  `Systemic inflammatory_UCell`, data = obj@meta.data)
 p4 <- ggplot(data = obj@meta.data, mapping = aes(x = `Microglial inflammatory_UCell`, y = `Systemic inflammatory_UCell`, colour = Ann_lvl_1H)) + ggrastr::rasterise(geom_point()) + 
     annotate('text', x = 0.1,y = 0.8, label = paste0('R-squared: ', as.character(round(summary(model)$r.squared,2))))
+cols <- c(Ucell_cols[15:16],'inf-res')
+plot_list <- lapply(cols, \(i){
+    p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
+    x_axis_theme + ggtitle(i)
+})
+p <- plot_list |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
 pdf(here('Glioma_Project/04_figs/00Test.pdf'), width = 15, height = 10)
 p1 + p2 
-p
 p3
 p4
+p
 dev.off()
 ```
 
-
-
-```{r computing inflamm scores}
+```{r}
+# Doing some comparisons:
 reduction_name <- 'M_M'
-seurat_obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+obj$`inf-res` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
 
-
-pseudo_seurat <- AggregateExpression(seurat_obj_subset, assays = "RNA", return.seurat = T, group.by = c("sample_name",'Ann_lvl_1H'))
+pseudo_seurat <- AggregateExpression(obj, assays = "RNA", return.seurat = T, group.by = c("sample_name"))
 df_list <- lapply(names(gene_list), \(.){data.frame('source' = .,'target' = gene_list[[.]],'mor' = 1)})
 net <- do.call(rbind,df_list)
 mat <- pseudo_seurat[["RNA"]]$counts
-net %>% head()
 res_mlm <- decoupleR::run_mlm(
     mat = mat,
     network = net,
@@ -413,20 +500,94 @@ res_mlm <- decoupleR::run_mlm(
     .target = "target",
     center = FALSE
 )
+meta_df <- obj@meta.data
+meta_df[,c(9:30,38:40)] %>% distinct() -> new_df
+new_df %>% tibble::remove_rownames() -> distinct_meta
+check <- lapply(colnames(distinct_meta),\(c){if(class(distinct_meta[[c]]) == 'list'){distinct_meta[[c]] <- as.character(distinct_meta[[c]])} else {distinct_meta[[c]]} }) %>% as.data.frame()
+colnames(check) <- colnames(distinct_meta)
+check$sample_name <-  gsub('_','-',x =check$sample_name)
+res_mlm <- res_mlm |> left_join(check,by = join_by(condition == sample_name))
+
+# ggpubr::compare_means(score~ IDH_status,res_mlm, group.by = 'source')
+# ggpubr::compare_means(score~ tumour_full,res_mlm,group.by = 'source')
+
+p_overview_IDH <- res_mlm %>% ggplot(mapping = aes(x = IDH_status, y = score))+
+    geom_boxplot()  + 
+    facet_wrap(~source,nrow = 1, scales = 'free_y')+
+    ggpubr::stat_compare_means(comparisons = list(c('wild_type','mutant')),label = 'p.signif',method = 'wilcox.test') +
+    theme_bw() + x_axis_theme 
+p_overview_tumour <- res_mlm %>% ggplot(mapping = aes(x = tumour_abbreviated, y = score))+
+    geom_boxplot()  + 
+    facet_wrap(~source,nrow = 1, scales = 'free_y')+
+    ggpubr::stat_compare_means(comparisons = list(c('ASTR','GBM'),c('ASTR','ODG'),c('GBM','ODG')),label = 'p.signif',method = 'wilcox.test') +
+    theme_bw() + x_axis_theme 
+pdf(here('Glioma_Project/04_figs/significance_testing.pdf'), width = 9, height = 5)
+p_overview_IDH
+p_overview_tumour
+dev.off()
+# ggpubr documentation shows the annotation and significance.
+# ns: p > 0.05
+# *: p <= 0.05
+# **: p <= 0.01
+# ***: p <= 0.001
+# ****: p <= 0.0001
+```
+
+```{r computing ratios}
+seurat_obj_path <- ifelse(!is.null(sub_dir), here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+seurat_obj_clean <- subset(seurat_obj, subset = Ann_lvl_2 %in% c('Bad-quality','Hb+'), invert = TRUE)
+seurat_obj_clean_P <- seurat_processing_manual(seurat_obj_clean, reduction_name = 'clean')
+metadf <- seurat_obj_clean@meta.data %>% group_by(Ann_lvl_2,Ann_lvl_1H,sample_name) %>% summarise(count = n()) %>% group_by(sample_name) %>% mutate(percentage = (count / sum(count) )* 100 )
+metadf$Ann_lvl_1H %>% table()
+seurat_obj_clean@meta.data[,c('sample_name','Ann_lvl_1H')] %>% table()
+
+## Ratios to compute:
+## T-cells to Myeloid fraction
+## T-cells to DC fraction
+## Microglia to Macro/Mono 
+
+metadf <- seurat_obj_clean@meta.data %>% group_by(Ann_lvl_2,Ann_lvl_1H,sample_name) %>% summarise(count = n())
+# Creating the totals.
+total_df <- metadf %>%  group_by(sample_name) %>% summarise(sample_count = sum(count)) %>% as.data.frame()
+total_df <- metadf %>% filter(Ann_lvl_1H %in% c('T-CD8+','T-CD4+','T-other','NK','T-Prolif')) %>% group_by(sample_name) %>% summarise(Tcellcount = sum(count)) %>% as.data.frame() %>% right_join(total_df, by = 'sample_name')
+total_df <- metadf %>% filter(!Ann_lvl_1H %in% c('T-CD8+','T-CD4+','T-other','NK','T-Prolif')) %>% group_by(sample_name) %>% summarise(Mcellcount = sum(count)) %>% as.data.frame() %>% right_join(total_df, by = 'sample_name')
+
+
+total_df <- metadf %>% filter(Ann_lvl_1H %in% c('DCs')) %>% group_by(sample_name) %>% summarise(DC_count = sum(count)) %>% as.data.frame() %>% right_join(total_df, by = 'sample_name')
+total_df <- metadf %>% filter(Ann_lvl_1H %in% c('Microglia')) %>% group_by(sample_name) %>% summarise(Microglia = sum(count)) %>% as.data.frame() %>% right_join(total_df, by = 'sample_name')
+total_df <- metadf %>% filter(Ann_lvl_1H %in% c('Macrophage','Monocyte')) %>% group_by(sample_name) %>% summarise(Macro_mono = sum(count)) %>% as.data.frame() %>% right_join(total_df, by = 'sample_name')
+```
+
+
+```{r computing inflamm scores}
+reduction_name <- 'M_M'
+seurat_obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+pseudo_seurat <- AggregateExpression(seurat_obj_subset, assays = "RNA", return.seurat = T, group.by = c("sample_name",'Ann_lvl_1H'))
+df_list <- lapply(names(gene_list), \(.){data.frame('source' = .,'target' = gene_list[[.]],'mor' = 1)})
+net <- do.call(rbind,df_list)
+mat <- pseudo_seurat[["RNA"]]$counts
+
+res_mlm <- decoupleR::run_mlm(
+    mat = mat,
+    network = net,
+    .source = "source",
+    .target = "target",
+    center = FALSE
+)
+res_mlm
 mat_mlm <- res_mlm %>%
-        tidyr::separate(col = condition, sep = "_", into = c("sample_name", "Celltype"), remove = FALSE) %>%      
+        # tidyr::separate(col = condition, sep = "_", into = c("sample_name", "Celltype"), remove = FALSE) %>%      
         decoupleR::pivot_wider_profile(id_cols = source, 
                                            names_from = condition, 
                                            values_from = score) 
+mat_mlm
 maxs <- apply(mat_mlm,2, max)
 mins <- apply(mat_mlm, 2, min)
-scaled_m <- scale(mat_mlm, center = mins, scale = maxs - mins)
-
+scaled_m <- scale(mat_mlm, center = mins, scale = maxs - mins) # scaling the values for heatmap
 colors <- rev(RColorBrewer::brewer.pal(n = 11, name = "RdBu"))
 colors.use <- grDevices::colorRampPalette(colors = colors)(100)
-
-
-mat_mlm %>% head()
 # Heatmap
 pheatmap::pheatmap(mat = t(scaled_m[,1:30]),
                    color = colors.use,
@@ -438,7 +599,7 @@ pheatmap::pheatmap(mat = t(scaled_m[,1:30]),
                    treeheight_row = 0,
                    treeheight_col = 0)
 
-plot_df <- res_mlm %>% filter(p_value < 0.05) %>%
+plot_df <- res_mlm %>% filter(p_value < 0.05) %>% # Filter necessary?
         tidyr::separate(col = condition, sep = "_", into = c("sample_name", "Celltype"), remove = FALSE)
 
 plot_df %>% ggplot(mapping = aes(x = Celltype, y = score)) + geom_boxplot() + facet_wrap(~source) + theme_bw() + x_axis_theme 
@@ -468,19 +629,8 @@ ggsave(here('Glioma_Project/04_figs/DecouplR_results.pdf'))
 # )
 ```
 
-```{r residency sig, eval = F}
-BD <-  c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4")
-MG <- c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
-```
 
 
-```{r computing signatures on subsets, eval = F}
-
-seurat_obj <- AddModuleScore_UCell(seurat_obj,
-    features = gene_list
-)
-
-```
 
 RE: Milo, would make more sense to split Lymphoid and Myeloid cells and maybe,
 just for the plots, split the myeloids into microglia, macrophages, monocytes and DCs
