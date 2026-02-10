@@ -958,6 +958,6 @@ seurat_processing_manual <- \(obj, reduction_name){
     if (harmony){
         obj <- JoinLayers(obj)
     }
-    print(block_label,norm,hvf_n,n_PCS,res,reduction_name)
+    # print(block_label,norm,hvf_n,n_PCS,res,reduction_name)
     return(obj)
 }

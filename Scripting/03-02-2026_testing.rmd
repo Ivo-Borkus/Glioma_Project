@@ -122,37 +122,35 @@ gene_list <- list(
 reduction_name <- 'M_M'
 obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
 Ucell_cols <- colnames(obj@meta.data)[obj@meta.data %>% colnames() %>% grep('UCell',.)]
-.feature_plot(obj,reduction = paste0('harmony_umap.',reduction_name),features = Ucell_cols)
-p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
-p2 <- FeaturePlot(obj,reduction = paste0('harmony_umap.',reduction_name),features = Ucell_cols[14:18], raster = T) & NoAxes()
-DotPlot(obj, features = Ucell_cols[14:18], group.by='Ann_lvl_2',cluster.idents = T) + x_axis_theme
-
-obj$`infiltration-residence` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
-# p <- VlnPlot(obj, features = c(Ucell_cols[14:18],'infiltration-residence'), group.by = 'Ann_lvl_2', ncol = 2,raster = T, pt.size = 0) + x_axis_theme
-# p3 <- VlnPlot(obj, features ='infiltration-residence', group.by = 'Ann_lvl_2', ncol = 2,raster = T, pt.size = 0) + x_axis_theme
-# model <- lm(`Microglial inflammatory_UCell` ~  `Systemic inflammatory_UCell`, data = obj@meta.data)
-# p4 <- ggplot(data = obj@meta.data, mapping = aes(x = `Microglial inflammatory_UCell`, y = `Systemic inflammatory_UCell`, colour = Ann_lvl_1H)) + ggrastr::rasterise(geom_point()) + 
-    # annotate('text', x = 0.1,y = 0.8, label = paste0('R-squared: ', as.character(round(summary(model)$r.squared,2))))
-cols <- c(Ucell_cols[15:16],'infiltration-residence')
+obj$`Infiltration-Residence` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
+model <- lm(`Microglial inflammatory_UCell` ~  `Systemic inflammatory_UCell`, data = obj@meta.data)
+p_scatter <- ggplot(data = obj@meta.data, mapping = aes(x = `Microglial inflammatory_UCell`, y = `Systemic inflammatory_UCell`, colour = Ann_lvl_1H)) + ggrastr::rasterise(geom_point()) + 
+    annotate('text', x = 0.1,y = 0.8, label = paste0('R-squared: ', as.character(round(summary(model)$r.squared,2))))
+cols <- c(Ucell_cols[15:16],'Infiltration-Residence')
 plot_list <- lapply(cols, \(i){
     p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
     x_axis_theme + ggtitle(i)
 })
 p <- plot_list |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
 
-cols_2 <-  c(Ucell_cols[14:18],'infiltration-residence')
+cols_2 <-  c(Ucell_cols[14:18],'Infiltration-Residence')
 plot_list_2 <- lapply(cols_2, \(i){
     p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
     x_axis_theme + ggtitle(i)
 })
 pextra <- plot_list_2 |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
+# obj@meta.data %>% colnames()
+cols_3 <-  c('log_nCount_RNA','log_nFeature_RNA','percent_mt')
+plot_list_3 <- lapply(cols_3, \(i){
+    p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
+    x_axis_theme + ggtitle(i)
+})
+pqc <- plot_list_3 |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
 
 pdf(here('Glioma_Project/04_figs/01_Signature_violins.pdf'), width = 15, height = 10)
-# p1 + p2 
-# p3
-# p4
 p
 pextra
+pqc
 dev.off()
 ```
 
@@ -160,8 +158,8 @@ dev.off()
 # Doing some comparisons:
 reduction_name <- 'M_M'
 obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
-obj$`inf-res` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
-
+obj$`Infiltration-Residence` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
+obj$Ann_lvl_2 %>% table()
 pseudo_seurat <- AggregateExpression(obj, assays = "RNA", return.seurat = T, group.by = c("sample_name"))
 df_list <- lapply(names(gene_list), \(.){data.frame('source' = .,'target' = gene_list[[.]],'mor' = 1)})
 net <- do.call(rbind,df_list)
@@ -194,7 +192,7 @@ p_overview_tumour <- res_mlm %>% ggplot(mapping = aes(x = tumour_abbreviated, y 
     facet_wrap(~source,nrow = 1, scales = 'free_y')+
     ggpubr::stat_compare_means(comparisons = list(c('ASTR','GBM'),c('ASTR','ODG'),c('GBM','ODG')),label = 'p.signif',method = 'wilcox.test') +
     theme_bw() + x_axis_theme 
-pdf(here('Glioma_Project/04_figs/significance_testing.pdf'), width = 9, height = 5)
+pdf(here('Glioma_Project/04_figs/02_significance_testing.pdf'), width = 9, height = 5)
 p_overview_IDH
 p_overview_tumour
 dev.off()
@@ -211,13 +209,16 @@ seurat_obj_path <- ifelse(!is.null(sub_dir), here(obj_path, sub_dir, paste0(Proc
 seurat_obj <- qs_read(seurat_obj_path)
 .size(seurat_obj)
 seurat_obj_clean <- subset(seurat_obj, subset = Ann_lvl_2 %in% c('Bad-quality','Hb+'), invert = TRUE)
-seurat_obj_clean_P <- seurat_processing_manual(seurat_obj_clean, reduction_name = 'clean')
+# seurat_obj_clean_P <- seurat_processing_manual(seurat_obj_clean, reduction_name = 'clean') # sample_name, 2000, 30, 3
+# qs_save(seurat_obj_clean_P,here('Glioma_Project/03_seurat_objects/Processed_Clean.qs2'))
+seurat_obj_clean_P <- qs_read(here('Glioma_Project/03_seurat_objects/Processed_Clean.qs2'))
+p2 <-.seurat_dimplot(seurat_obj_clean_P, reduction = 'umap.harmony.clean',label = T, title = 'Ann_lvl_2',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
 metadf <- seurat_obj_clean@meta.data %>% group_by(Ann_lvl_2,Ann_lvl_1H,sample_name) %>% summarise(count = n()) %>% group_by(sample_name) %>% mutate(percentage = (count / sum(count) )* 100 )
 metadf$Ann_lvl_1H %>% table()
 seurat_obj_clean@meta.data[,c('sample_name','Ann_lvl_1H')] %>% table()
 
 ## Ratios to compute:
-## T-cells to Myeloid fraction
+## T-cells to Myeloid ratio
 ## T-cells to DC fraction
 ## Microglia to Macro/Mono 
 
@@ -231,8 +232,126 @@ total_df <- metadf %>% filter(!Ann_lvl_1H %in% c('T-CD8+','T-CD4+','T-other','NK
 total_df <- metadf %>% filter(Ann_lvl_1H %in% c('DCs')) %>% group_by(sample_name) %>% summarise(DC_count = sum(count)) %>% as.data.frame() %>% right_join(total_df, by = 'sample_name')
 total_df <- metadf %>% filter(Ann_lvl_1H %in% c('Microglia')) %>% group_by(sample_name) %>% summarise(Microglia = sum(count)) %>% as.data.frame() %>% right_join(total_df, by = 'sample_name')
 total_df <- metadf %>% filter(Ann_lvl_1H %in% c('Macrophage','Monocyte')) %>% group_by(sample_name) %>% summarise(Macro_mono = sum(count)) %>% as.data.frame() %>% right_join(total_df, by = 'sample_name')
+total_df[is.na(total_df)] <- 0
+total_df[['T_cells_Myeloid']] <- (total_df[['Tcellcount']] / total_df[['Mcellcount']])
+total_df[['T_cells_Microglia']] <- (total_df[['Tcellcount']] / total_df[['Microglia']])
+total_df[['T_cells_Macro_Mono']] <- (total_df[['Tcellcount']] / total_df[['Macro_mono']])
+
+total_df[['T_cells_DC']] <- (total_df[['Tcellcount']] / total_df[['DC_count']])
+total_df[['Microglia_Macro_mono']] <- (total_df[['Microglia']] / total_df[['Macro_mono']])
+total_df[['DC_count_Microglia']] <- (total_df[['DC_count']] / total_df[['Microglia']])
 ```
 
+```{r}
+total_df$sample_name <-  gsub('_','-',x =total_df$sample_name)
+res_mlm_final <- res_mlm |> left_join(total_df,by = join_by(condition == sample_name))
+p <- lapply(colnames(total_df)[2:13], \(col){
+    plot <- res_mlm_final %>% ggpubr::ggscatter(x = as.character(col), y = 'score',
+        add = 'reg.line',
+        add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line    conf.int = TRUE, # Add confidence interval
+        cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+        conf.int = TRUE, # Add confidence interval
+        cor.coeff.args = list(method = "pearson", label.sep = "\n")
+    )  + x_axis_theme
+    plot <- ggpubr::facet(plot, facet.by = c('source','tumour_abbreviated'),scales = 'free',  short.panel.labs = T,   # Allow long labels in panels
+        panel.labs.background = list(fill = "grey", color = "grey"), panel.labs.font = list(size = 13, color = 'black'))
+    return(plot)
+})
+pdf(here('Glioma_Project/04_figs/significance_ratios_SUBtype.pdf'), width = 8, height = 15)
+p
+dev.off()
+
+
+p2 <- lapply(colnames(total_df)[2:13], \(col){
+    plot <- res_mlm_final %>% ggpubr::ggscatter(x = as.character(col), y = 'score',
+        add = 'reg.line',
+        add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line    conf.int = TRUE, # Add confidence interval
+        cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+        conf.int = TRUE, # Add confidence interval
+        cor.coeff.args = list(method = "pearson")
+    )  + x_axis_theme
+    plot <- ggpubr::facet(plot, facet.by = c('source','IDH_status'),scales = 'free',  short.panel.labs = TRUE,  # Allow long labels in panels
+        panel.labs.background = list(fill = "grey", color = "grey"), panel.labs.font = list(size = 13, color = 'black'))
+    return(plot)
+})
+pdf(here('Glioma_Project/04_figs/significance_ratios_IDH.pdf'), width = 8, height = 12)
+p2
+dev.off()
+# col <- colnames(total_df[2])
+# plot <- res_mlm_final %>% ggplot(mapping = aes(x =!!sym(col), y = score))+
+#     geom_point()  + 
+#     facet_grid(tumour_abbreviated~source, scales = 'free_y')+
+#     theme_bw() + x_axis_theme 
+
+```
+
+```{r trying some statistical tests continous}
+res_mlm_final$cells_nuclei <- NULL
+res_mlm_final$pool_correct <- NULL
+res_mlm_final$age_at_surgery <- NULL
+res_mlm_final$age_at_surgery_correct <- as.numeric(res_mlm_final$age_at_surgery_correct)
+
+# str(res_mlm_final)
+columns_to_check <- unlist(lapply(colnames(res_mlm_final)[7:38], \(col){
+    vec <- res_mlm_final[[col]]
+    if (is.character(vec) && length(unique(vec) > 1)){
+        print(col)
+    }
+}))
+
+columns_to_check <- columns_to_check[-which(columns_to_check == 'cell_het_paper_id')]
+
+list_testing <- lapply(columns_to_check, \(col){ 
+    result <- ggpubr::compare_means(as.formula(paste0('score ~ ',as.character(col))),res_mlm_final,group.by = 'source')
+    result$comparison <- as.character(col)
+    return(result)
+})
+
+testing_object <- do.call(rbind,list_testing)
+testing_object %>% as.data.frame() %>% filter(p.adj < 0.05) %>% gt::gt()
+
+columns_to_check_continous <- unlist(lapply(colnames(res_mlm_final)[7:38], \(col){
+    vec <- res_mlm_final[[col]]
+    if (is.numeric(vec) && length(unique(vec) > 1)){
+        print(col)
+    }
+}))
+
+options(na.action = na.omit)
+result_dfs <- lapply(columns_to_check_continous, \(col){
+    result_list <- lapply(unique(res_mlm_final_c$source),\(group){
+        data <- res_mlm_final_c[res_mlm_final_c$source == group,]
+        data <- data[!(data[[col]]) > 10000000,] # Getting rid of inf`
+        result <- lm(data = data,as.formula(paste0('score ~ ',as.character(col))))
+        df <- data.frame(group =  group,
+            'R-squared' = summary(result)$r.squared,
+            'p_value' = summary(result)$coefficients[2,4])
+        return(df)
+    })
+    final_df <- do.call(rbind,result_list)
+    final_df$comparison <- col
+    return(final_df)
+})
+result_df <- do.call(rbind,result_dfs)
+result_df %>% filter(R.squared > 0.4) %>% filter(p_value < 0.05 )
+```
+
+```{r}
+# testing
+colnames(res_mlm_final)
+plot <- res_mlm_final %>% ggpubr::ggscatter(x = as.character('DC_count_Microglia'), y = 'score',
+        add = 'reg.line',
+        add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line    conf.int = TRUE, # Add confidence interval
+        cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+        conf.int = TRUE, # Add confidence interval
+        cor.coeff.args = list(method = "pearson", label.x = max(res_mlm_final[[as.character('DC_count_Microglia')]])/4, label.sep = "\n")
+    )  + x_axis_theme
+plot
+c('source','IDH_status')
+plot <- ggpubr::facet(plot, facet.by = c('source','IDH_status'),scales = 'free',  short.panel.labs = TRUE,  # Allow long labels in panels
+        panel.labs.background = list(fill = "skyblue", color = "skyblue"))
+plot
+```
 
 ```{r computing inflamm scores}
 reduction_name <- 'M_M'
