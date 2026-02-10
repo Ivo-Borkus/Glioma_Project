@@ -301,6 +301,8 @@ columns_to_check <- unlist(lapply(colnames(res_mlm_final)[7:38], \(col){
 
 columns_to_check <- columns_to_check[-which(columns_to_check == 'cell_het_paper_id')]
 
+res_mlm_final$source_group <- paste0('source_')
+
 list_testing <- lapply(columns_to_check, \(col){ 
     result <- ggpubr::compare_means(as.formula(paste0('score ~ ',as.character(col))),res_mlm_final,group.by = 'source')
     result$comparison <- as.character(col)
