@@ -886,3 +886,78 @@ plotting_PCA_regress <- \(df_corr, limit_n = 0.5){
     genes <- genes[grepl("^IG[HLK][VDJCAGM]", genes, ignore.case = TRUE) & toupper(genes) == "JCHAIN"  |  !genes %in% c(pseudo_genes_BCR)]
     return(genes)
 }
+
+
+seurat_processing_manual <- \(obj, reduction_name){
+    block_label <-readline(prompt = "Insert Batch label: ")
+    block_label_null <- switch(toupper(block_label),'NULL' = NULL, block_label)
+    if (!is.null(block_label_null)){
+        harmony = T
+        block_label <- as.character(block_label)
+        obj[["RNA"]] <- split(obj[["RNA"]], f = obj@meta.data[[block_label]])
+        reduction_pca <- paste0("harmony_pca.", reduction_name)
+        reduction_umap <- paste0("umap.harmony.", reduction_name)
+    }   else {
+        reduction_pca <- paste0("pca_", reduction_name)
+        reduction_umap <- paste0("umap_", reduction_name)
+    }
+    norm <- as.logical(readline(prompt = 'Normalise? T or F: '))
+    if (norm){
+        obj <- NormalizeData(
+            object = obj,
+            normalization.method = 'LogNormalize',
+            scale.factor = as.numeric(10000)
+        )}
+
+    hvf_n <- as.numeric(readline(prompt = "Enter the number of HVF: "))
+    obj <- FindVariableFeatures(obj, selection.method = 'vst', nfeatures = hvf_n, verbose = F)
+    obj <- ScaleData(object = obj, features = VariableFeatures(obj), verbose = FALSE)
+    n_PCS <- 50
+    obj <- RunPCA(
+            object = obj, features = VariableFeatures(obj),
+            nfeatures.print = 5, ndims.print = 1:2,
+            reduction.name = paste0("pca_", reduction_name),
+            npcs = n_PCS
+        )
+    p1 <-ElbowPlot(obj, reduction = paste0("pca_", reduction_name), ndims = n_PCS)
+    p2 <- VizDimLoadings(obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 10)
+    print(wrap_plots(list(p1,p2)))
+    n_PCS <- as.numeric(readline(prompt = "n_PCS: "))
+    obj <- RunPCA(
+        object = obj, features = VariableFeatures(obj),
+        nfeatures.print = 5, ndims.print = 1:2,
+        reduction.name = paste0("pca_", reduction_name),
+        npcs = n_PCS
+    )    
+    print('running UMAP')
+    obj <- RunUMAP(obj, reduction =  paste0("pca_", reduction_name), dims = 1:as.numeric(n_PCS), reduction.name =  paste0("umap_", reduction_name))
+
+    if (harmony){
+        p1 <-.seurat_dimplot(obj, reduction = paste0("umap_", reduction_name),label = T, title = 'Blocking label',group = block_label, pt.size = 1) #+ theme(legend.position = 'none')
+        print("Running Harmony")
+        obj <- IntegrateLayers(
+            object = obj, method = HarmonyIntegration,
+            orig.reduction = paste0("pca_", reduction_name), new.reduction = reduction_pca,
+            verbose = TRUE
+        )
+        print('Generating Umap harmonised')
+        obj <- RunUMAP(obj, reduction =  reduction_pca, dims = 1:as.numeric(n_PCS), reduction.name =  reduction_umap)
+
+        p2 <-.seurat_dimplot(obj, reduction = reduction_umap,label = T, title = 'Blocking label',group = block_label, pt.size = 1) #+ theme(legend.position = 'none')
+        print(wrap_plots(p1 + p2))
+    }
+    obj <- FindNeighbors(obj, reduction = reduction_pca, dims = 1:as.numeric(n_PCS))
+    res_list <- list('1'= c(0.01,0.05,0.1,0.3),'2' = c(0.7,0.9,1.5),'3' = c(0.01,0.05,0.1,0.3, 0.5,0.7,0.9,1.5))
+    print(res_list)
+    res <- readline(prompt = 'Please insert clustering res to use: ')
+    res <- switch(toupper(res),'NULL' = NULL, res_list[[res]])
+    if (!is.null(res)){
+        print(paste("clustering with leiden and clustering resolutions: ", res))
+        obj <- FindClusters(obj, resolution = res, algorithm = 4) # Leiden
+    }
+    if (harmony){
+        obj <- JoinLayers(obj)
+    }
+    print(block_label,norm,hvf_n,n_PCS,res,reduction_name)
+    return(obj)
+}

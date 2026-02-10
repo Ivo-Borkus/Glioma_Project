@@ -88,186 +88,6 @@ sub_dir <- NULL
 feature_vec_chosen <- feature_vec_overall
 ```
 
-```{r}
-seurat_obj_path <- ifelse(!is.null(sub_dir), here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
-seurat_obj <- qs_read(seurat_obj_path)
-.size(seurat_obj)
-#https://www.nature.com/articles/s41556-025-01840-5
-
-# seurat_obj@meta.data  <- seurat_obj@meta.data %>%
-#     mutate(Ann_lvl_2 = recode(Ann_lvl_2, `Ma-Inflam` = 'Ma_SLC2A1+' ))
-# seurat_obj@meta.data$Ann_lvl_2 %>% table()
-# qs_save(seurat_obj, seurat_obj_path)
-```
-
-```{r, eval = F}
-meta_df <- seurat_obj@meta.data
-meta_df[,c(9:30,38:40)] %>% distinct() -> new_df
-new_df %>% tibble::remove_rownames() -> distinct_meta
-check <- lapply(colnames(distinct_meta),\(c){if(class(distinct_meta[[c]]) == 'list'){distinct_meta[[c]] <- as.character(distinct_meta[[c]])} else {distinct_meta[[c]]} }) %>% as.data.frame()
-colnames(check) <- colnames(distinct_meta)
-write.csv(check, here('Glioma_Project/01_data/00_metadata.csv'))
-
-seurat_obj@meta.data$file_name %>% unique()
-(seurat_obj$cell_het_paper_id == 'ODG-7') %>% table() # Strange
-```
-
-```{r cleaning the objects}
-p <- VlnPlot(seurat_obj, features = c('nCount_RNA','nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
-# pdf(here('Glioma_Project/04_figs/00Test.pdf'), width= 15, height = 20)
-# p
-# dev.off()
-Idents(seurat_obj) <- 'Ann_lvl_2'
-seurat_obj$log_nCount_RNA <- log(seurat_obj$nCount_RNA, base = 10)
-seurat_obj$log_nFeature_RNA <- log(seurat_obj$nFeature_RNA, base = 10)
-Myeloid_anns <- c("Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active", "BAMs", "TAMs", "Ma_SLC2A1+", "Ma-IFN", "Ma-Mt+", "Mono-Classic","Myeloid_Prolif","DCs_CD1C+","pDCs",'Mast-cells')
-T_anns <- c('CD8+_TNFSF9','CD8+_Cytotoxic','CD8+ Eff-Exh','CD4+ cm','CD4+ Tfh','Tregs','T-IFN','T_Prolif','MAIT-cells','NK')
-seurat_obj_M <- subset(x = seurat_obj, idents = Myeloid_anns, invert = F)
-seurat_obj_T <- subset(x = seurat_obj, idents = T_anns, invert =F)
-```
-
-```{r T cells}
-obj <- seurat_obj_T
-reduction_name <- 'T'
-samples_to_use <- obj@meta.data %>% group_by(sample_name) %>% summarise(count = n()) %>% filter(count> 1) %>% select(sample_name) %>%unlist(as.vector(.))# as.vector()
-obj <- subset(obj, subset = sample_name %in% samples_to_use)
-obj[["RNA"]] <- split(obj[["RNA"]], f = obj@meta.data[["sample_name"]])
-obj <- FindVariableFeatures(obj, selection.method = 'vst', nfeatures = 1000, verbose = F)
-VariableFeatures(obj) <- .remove_VDJ(VariableFeatures(obj))
-obj <- ScaleData(object = obj, features = VariableFeatures(obj), verbose = FALSE)
-obj <- RunPCA(
-        object = obj, features = VariableFeatures(obj),
-        nfeatures.print = 5, ndims.print = 1:2,
-        reduction.name = paste0("pca_", reduction_name),
-        npcs = 100
-    )
-ElbowPlot(obj, reduction = paste0("pca_", reduction_name), ndims = 100)
-VizDimLoadings(obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 15)
-n_PCS <- 20
-obj <- RunPCA(
-        object = obj, features = VariableFeatures(obj),
-        nfeatures.print = 5, ndims.print = 1:2,
-        reduction.name = paste0("pca_", reduction_name),
-        npcs = n_PCS
-    )
-
-obj <- IntegrateLayers(
-            object = obj, method = HarmonyIntegration,
-            orig.reduction = paste0("pca_", reduction_name), new.reduction = paste0("harmony_pca.", reduction_name),
-            verbose = TRUE
-        )
-obj <- FindNeighbors(obj, reduction = paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS))
-res_values <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.5)
-obj <- FindClusters(obj, resolution = res_values, algorithm = clustering[2])
-obj <- RunUMAP(obj, reduction =  paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS), reduction.name =  paste0("harmony_umap.", reduction_name))
-obj <- JoinLayers(obj)
-
-
-
-p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
-resolution_columns <- grep("^RNA_snn_res\\.",
-    colnames(obj@meta.data),
-    value = TRUE
-)
-p2 <- .seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name), group = resolution_columns, label = TRUE) & NoLegend()
-p1 + p2
-Idents(obj) <- 'Ann_lvl_2'
-marker_list <- FindAllMarkers(
-    object = obj,
-    only.pos = F,
-    min.pct = 0.25,
-    logfc.threshold = 0.25
-)
-.marker_plot <- \(obj,marker_list,nmarkers = 5,cluster_var = F){
-    list_genes_clust <-marker_list %>%
-        arrange(cluster, desc(avg_log2FC)) %>% # Arrange within each cluster
-        group_by(cluster) %>%
-        select(cluster,gene) %>%
-        slice_head(n = nmarkers) %>%
-        group_split() %>% # Split into list by 'cluster'
-        setNames(unique(markers$cluster)) 
-    features <- unique(unlist(lapply(list_genes_clust, \(df){df$gene}),use.names = F))
-    p <- DotPlot(obj, features = features, cluster.idents = cluster_var) + theme_bw() + RotatedAxis()
-    return(p)
-}
-
-.marker_plot(obj,marker_list)
-ggsave(here('Glioma_Project/04_figs/markers_T_dot.pdf'), width = 12, height = 4.5)
-p1 <- VlnPlot(obj, features = c('log_nCount_RNA','log_nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
-p2 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
-p3 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = feature_vec_T) & NoLegend()
-plot <- p1 + p2
-ggsave(here('Glioma_Project/04_figs/violin_T.pdf'), width = 12, height = 10, plot = plot)
-ggsave(here('Glioma_Project/04_figs/markers_T.pdf'), width = 15, height = 30, plot = p3)
-
-qs_save(obj,here('Glioma_Project/03_seurat_objects/Processed_T.qs2'))
-```
-
-```{r myeloid}
-obj <- seurat_obj_M
-reduction_name <- 'M'
-samples_to_use <- obj@meta.data %>% group_by(sample_name) %>% summarise(count = n()) %>% filter(count> 1) %>% select(sample_name) %>%unlist(as.vector(.))# as.vector()
-obj <- subset(obj, subset = sample_name %in% samples_to_use)
-obj[["RNA"]] <- split(obj[["RNA"]], f = obj@meta.data[["sample_name"]])
-obj <- FindVariableFeatures(obj, selection.method = 'vst', nfeatures = 1000, verbose = F)
-VariableFeatures(obj) <- .remove_VDJ(VariableFeatures(obj))
-obj <- ScaleData(object = obj, features = VariableFeatures(obj), verbose = FALSE)
-obj <- RunPCA(
-        object = obj, features = VariableFeatures(obj),
-        nfeatures.print = 5, ndims.print = 1:2,
-        reduction.name = paste0("pca_", reduction_name),
-        npcs = 100
-    )
-ElbowPlot(obj, reduction = paste0("pca_", reduction_name), ndims = 100)
-VizDimLoadings(obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 15)
-n_PCS <- 20
-obj <- RunPCA(
-        object = obj, features = VariableFeatures(obj),
-        nfeatures.print = 5, ndims.print = 1:2,
-        reduction.name = paste0("pca_", reduction_name),
-        npcs = n_PCS
-    )
-
-obj <- IntegrateLayers(
-            object = obj, method = HarmonyIntegration,
-            orig.reduction = paste0("pca_", reduction_name), new.reduction = paste0("harmony_pca.", reduction_name),
-            verbose = TRUE
-        )
-obj <- FindNeighbors(obj, reduction = paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS))
-res_values <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.5)
-obj <- FindClusters(obj, resolution = res_values, algorithm = clustering[2])
-obj <- RunUMAP(obj, reduction =  paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS), reduction.name =  paste0("harmony_umap.", reduction_name))
-obj <- JoinLayers(obj)
-
-p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
-resolution_columns <- grep("^RNA_snn_res\\.",
-    colnames(obj@meta.data),
-    value = TRUE
-)
-p2 <- .seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name), group = resolution_columns, label = TRUE) & NoLegend()
-p1 + p2 # quick vis
-
-
-# Idents(obj) <- 'Ann_lvl_2'
-# marker_list <- FindAllMarkers(
-#     object = obj,
-#     only.pos = F,
-#     min.pct = 0.25,
-#     logfc.threshold = 0.25
-# )
-
-# .marker_plot(obj,marker_list)
-# ggsave(here('Glioma_Project/04_figs/markers_M_dot.pdf'), width = 15, height = 4.5)
-# p1 <- VlnPlot(obj, features = c('log_nCount_RNA','log_nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
-# p2 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
-# p3 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = Mgenes) & NoLegend()
-# plot <- p1 + p2
-# ggsave(here('Glioma_Project/04_figs/violin_M.pdf'), width = 12, height = 10, plot = plot)
-# ggsave(here('Glioma_Project/04_figs/markers_M.pdf'), width = 15, height = 30, plot = p3)
-qs_save(obj,here('Glioma_Project/03_seurat_objects/Processed_M.qs2'))
-
-```
-
 # To Do
 RE: pro/anti-inf signatures, I think it would make sense to compute the overall 
 signatures only on myeloid cells to compare the three diseases but you could also stratify then into
@@ -291,168 +111,11 @@ gene_list <- list(
     'Resident' = MG,
     'Infiltrating' = BD
 )
-obj <- AddModuleScore_UCell(obj,
-    features = gene_list
-)
+# obj <- AddModuleScore_UCell(obj,
+#     features = gene_list
+# )
 
 #  (or CD206 CD204),
-```
-
-```{r seurat manual processing}
-reduction_name <- 'M_M'
-obj <- seurat_obj_subset
-seurat_processing_manual <- \(obj, reduction_name){
-    block_label <-readline(prompt = "Insert Batch label: ")
-    block_label_null <- switch(toupper(block_label),'NULL' = NULL, block_label)
-    if (!is.null(block_label_null)){
-        harmony = T
-        block_label <- as.character(block_label)
-        obj[["RNA"]] <- split(obj[["RNA"]], f = obj@meta.data[[block_label]])
-        reduction_pca <- paste0("harmony_pca.", reduction_name)
-        reduction_umap <- paste0("umap.harmony.", reduction_name)
-    }   else {
-        reduction_pca <- paste0("pca_", reduction_name)
-        reduction_umap <- paste0("umap_", reduction_name)
-    }
-    norm <- as.logical(readline(prompt = 'Normalise? T or F: '))
-    if (norm){
-        obj <- NormalizeData(
-            object = obj,
-            normalization.method = 'LogNormalize',
-            scale.factor = as.numeric(10000)
-        )}
-
-    hvf_n <- as.numeric(readline(prompt = "Enter the number of HVF: "))
-    obj <- FindVariableFeatures(obj, selection.method = 'vst', nfeatures = hvf_n, verbose = F)
-    obj <- ScaleData(object = obj, features = VariableFeatures(obj), verbose = FALSE)
-    n_PCS <- 50
-    obj <- RunPCA(
-            object = obj, features = VariableFeatures(obj),
-            nfeatures.print = 5, ndims.print = 1:2,
-            reduction.name = paste0("pca_", reduction_name),
-            npcs = n_PCS
-        )
-    p1 <-ElbowPlot(obj, reduction = paste0("pca_", reduction_name), ndims = n_PCS)
-    p2 <- VizDimLoadings(obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 10)
-    print(wrap_plots(list(p1,p2)))
-    n_PCS <- as.numeric(readline(prompt = "n_PCS: "))
-    obj <- RunPCA(
-        object = obj, features = VariableFeatures(obj),
-        nfeatures.print = 5, ndims.print = 1:2,
-        reduction.name = paste0("pca_", reduction_name),
-        npcs = n_PCS
-    )    
-    print('running UMAP')
-    obj <- RunUMAP(obj, reduction =  paste0("pca_", reduction_name), dims = 1:as.numeric(n_PCS), reduction.name =  paste0("umap_", reduction_name))
-
-    if (harmony){
-        p1 <-.seurat_dimplot(obj, reduction = paste0("umap_", reduction_name),label = T, title = 'Blocking label',group = block_label, pt.size = 1) #+ theme(legend.position = 'none')
-        print("Running Harmony")
-        obj <- IntegrateLayers(
-            object = obj, method = HarmonyIntegration,
-            orig.reduction = paste0("pca_", reduction_name), new.reduction = reduction_pca,
-            verbose = TRUE
-        )
-        print('Generating Umap harmonised')
-        obj <- RunUMAP(obj, reduction =  reduction_pca, dims = 1:as.numeric(n_PCS), reduction.name =  reduction_umap)
-
-        p2 <-.seurat_dimplot(obj, reduction = reduction_umap,label = T, title = 'Blocking label',group = block_label, pt.size = 1) #+ theme(legend.position = 'none')
-        print(wrap_plots(p1 + p2))
-    }
-    obj <- FindNeighbors(obj, reduction = reduction_pca, dims = 1:as.numeric(n_PCS))
-    res_list <- list('1'= c(0.01,0.05,0.1,0.3),'2' = c(0.7,0.9,1.5),'3' = c(0.01,0.05,0.1,0.3, 0.5,0.7,0.9,1.5))
-    print(res_list)
-    res <- readline(prompt = 'Please insert clustering res to use: ')
-    res <- switch(toupper(res),'NULL' = NULL, res_list[[res]])
-    if (!is.null(res)){
-        print(paste("clustering with leiden and clustering resolutions: ", res))
-        obj <- FindClusters(obj, resolution = res, algorithm = 4) # Leiden
-    }
-    if (harmony){
-        obj <- JoinLayers(obj)
-    }
-    print(block_label,norm,hvf_n,n_PCS,res,reduction_name)
-    return(obj)
-}
-```
-
-
-```{r subset M}
-seurat_obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_M.qs2')))
-seurat_obj_subset <- subset(seurat_obj, subset = Ann_lvl_1H %in% c('Microglia','Macrophage','Monocyte','Myeloid_Prolif'))
-seurat_obj_subset <- AddModuleScore_UCell(
-    seurat_obj_subset,
-    features = gene_list)
-reduction_name <- 'M_M'
-obj <- seurat_obj_subset
-samples_to_use <- obj@meta.data %>% group_by(sample_name) %>% summarise(count = n()) %>% filter(count> 1) %>% select(sample_name) %>%unlist(as.vector(.))# as.vector()
-obj <- subset(obj, subset = sample_name %in% samples_to_use)
-obj[["RNA"]] <- split(obj[["RNA"]], f = obj@meta.data[["sample_name"]])
-obj <- FindVariableFeatures(obj, selection.method = 'vst', nfeatures = 1000, verbose = F)
-VariableFeatures(obj) <- .remove_VDJ(VariableFeatures(obj))
-obj <- ScaleData(object = obj, features = VariableFeatures(obj), verbose = FALSE)
-obj <- RunPCA(
-        object = obj, features = VariableFeatures(obj),
-        nfeatures.print = 5, ndims.print = 1:2,
-        reduction.name = paste0("pca_", reduction_name),
-        npcs = 100
-    )
-ElbowPlot(obj, reduction = paste0("pca_", reduction_name), ndims = 100)
-VizDimLoadings(obj, dims = 1:5, reduction = paste0("pca_", reduction_name), nfeatures = 15)
-n_PCS <- 20
-obj <- RunPCA(
-        object = obj, features = VariableFeatures(obj),
-        nfeatures.print = 5, ndims.print = 1:2,
-        reduction.name = paste0("pca_", reduction_name),
-        npcs = n_PCS
-    )
-
-obj <- IntegrateLayers(
-            object = obj, method = HarmonyIntegration,
-            orig.reduction = paste0("pca_", reduction_name), new.reduction = paste0("harmony_pca.", reduction_name),
-            verbose = TRUE
-        )
-obj <- FindNeighbors(obj, reduction = paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS))
-res_values <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.5)
-obj <- FindClusters(obj, resolution = res_values, algorithm = clustering[2])
-obj <- RunUMAP(obj, reduction =  paste0("harmony_pca.", reduction_name), dims = 1:as.numeric(n_PCS), reduction.name =  paste0("harmony_umap.", reduction_name))
-obj <- JoinLayers(obj)
-
-p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
-resolution_columns <- grep("^RNA_snn_res\\.",
-    colnames(obj@meta.data),
-    value = TRUE
-)
-qs_save(obj,here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
-
-Idents(obj) <- 'Ann_lvl_2'
-marker_list <- FindAllMarkers(
-    object = obj,
-    only.pos = F,
-    min.pct = 0.25,
-    logfc.threshold = 0.25
-)
-p <- .marker_plot(obj,marker_list)
-p1 <- VlnPlot(obj, features = c('log_nCount_RNA','log_nFeature_RNA','percent_mt'), group.by = 'Ann_lvl_2', ncol = 2) 
-p2 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation M_M cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
-p3 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = Mgenes) & NoLegend()
-p4 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = 'SLC2A1') & NoLegend()
-plot <- p1 + p2
-ggsave(here('Glioma_Project/04_figs/markers_M_M_dot.pdf'),plot = p, width = 15, height = 4.5)
-ggsave(here('Glioma_Project/04_figs/violin_M_M.pdf'), width = 12, height = 10, plot = plot)
-ggsave(here('Glioma_Project/04_figs/markers_M_M.pdf'), width = 15, height = 30, plot = p3)
-pdf(here('Glioma_Project/04_figs',paste0('Overview_figures',reduction_name),'.pdf'))
-p
-plot
-p3
-p4 + p2
-dev.off()
-
-# M1 <- c('FCGR2B','FCGR1A','CD68','CD80','CD86' ) #CD32, CD64, CD68, CD80, and CD86, 
-# feature_vec <- c('IL1A','IL1B','IL6','IL4',"TNF",'CCL2',"CCL3","CCL5",'CXCL1',"CXCL2","IFNG")
-# p5 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = feature_vec) & NoLegend()
-# p6 <- .feature_plot(obj, reduction = paste0("harmony_umap.", reduction_name), features = M1) & NoLegend()
-
 ```
 
 ```{r trying some signatures on UMAP}
@@ -463,23 +126,33 @@ Ucell_cols <- colnames(obj@meta.data)[obj@meta.data %>% colnames() %>% grep('UCe
 p1 <-.seurat_dimplot(obj, reduction = paste0("harmony_umap.", reduction_name),label = T, title = 'Annotation T cells',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
 p2 <- FeaturePlot(obj,reduction = paste0('harmony_umap.',reduction_name),features = Ucell_cols[14:18], raster = T) & NoAxes()
 DotPlot(obj, features = Ucell_cols[14:18], group.by='Ann_lvl_2',cluster.idents = T) + x_axis_theme
-obj$`inf-res` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
-p <- VlnPlot(obj, features = c(Ucell_cols[14:18],'inf-res'), group.by = 'Ann_lvl_2', ncol = 2,raster = T, pt.size = 0) + x_axis_theme
-p3 <- VlnPlot(obj, features ='inf-res', group.by = 'Ann_lvl_2', ncol = 2,raster = T, pt.size = 0) + x_axis_theme
-model <- lm(`Microglial inflammatory_UCell` ~  `Systemic inflammatory_UCell`, data = obj@meta.data)
-p4 <- ggplot(data = obj@meta.data, mapping = aes(x = `Microglial inflammatory_UCell`, y = `Systemic inflammatory_UCell`, colour = Ann_lvl_1H)) + ggrastr::rasterise(geom_point()) + 
-    annotate('text', x = 0.1,y = 0.8, label = paste0('R-squared: ', as.character(round(summary(model)$r.squared,2))))
-cols <- c(Ucell_cols[15:16],'inf-res')
+
+obj$`infiltration-residence` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
+# p <- VlnPlot(obj, features = c(Ucell_cols[14:18],'infiltration-residence'), group.by = 'Ann_lvl_2', ncol = 2,raster = T, pt.size = 0) + x_axis_theme
+# p3 <- VlnPlot(obj, features ='infiltration-residence', group.by = 'Ann_lvl_2', ncol = 2,raster = T, pt.size = 0) + x_axis_theme
+# model <- lm(`Microglial inflammatory_UCell` ~  `Systemic inflammatory_UCell`, data = obj@meta.data)
+# p4 <- ggplot(data = obj@meta.data, mapping = aes(x = `Microglial inflammatory_UCell`, y = `Systemic inflammatory_UCell`, colour = Ann_lvl_1H)) + ggrastr::rasterise(geom_point()) + 
+    # annotate('text', x = 0.1,y = 0.8, label = paste0('R-squared: ', as.character(round(summary(model)$r.squared,2))))
+cols <- c(Ucell_cols[15:16],'infiltration-residence')
 plot_list <- lapply(cols, \(i){
     p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
     x_axis_theme + ggtitle(i)
 })
 p <- plot_list |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
-pdf(here('Glioma_Project/04_figs/00Test.pdf'), width = 15, height = 10)
-p1 + p2 
-p3
-p4
+
+cols_2 <-  c(Ucell_cols[14:18],'infiltration-residence')
+plot_list_2 <- lapply(cols_2, \(i){
+    p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
+    x_axis_theme + ggtitle(i)
+})
+pextra <- plot_list_2 |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
+
+pdf(here('Glioma_Project/04_figs/01_Signature_violins.pdf'), width = 15, height = 10)
+# p1 + p2 
+# p3
+# p4
 p
+pextra
 dev.off()
 ```
 
