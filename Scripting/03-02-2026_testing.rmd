@@ -85,8 +85,8 @@ then you can apply a max rank sum test on the score per patient between groups (
 # Programs, origins and immunomodulatory functions of myeloid cells in glioma
 # Cel reports medicine Juan nieto: 
 # Tumor heterogeneity and tumor-microglia interactions in primary and recurrent IDH1-mutant gliomass
-BD <-  c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4")
-MG <- c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
+BD <-  c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "SELENOP", "SLC40A1", "CXCR4")
+MG <- c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7",  "FOLR2", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
 gene_list <- list(
     'Systemic inflammatory' = c('IL1B', 'IL1A', 'CCL2', 'TNF', 'OSM', 'CXCL8','CD83','CCL4','CCL3','CD74'),
     'Microglial inflammatory' = c('CXCR4', 'CXCL12', 'CCL3', 'CCL5', 'CX3CR1', 'RHOB', 'JUN', 'KLF2', 'EGR1', 'PDK4', 'P2RY13','ICAM1','RELB','TNFAIP3'),
@@ -148,24 +148,19 @@ dev.off()
 ```
 
 ```{r computing ratios}
-seurat_obj_path <- ifelse(!is.null(sub_dir), here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
-seurat_obj <- qs_read(seurat_obj_path)
-.size(seurat_obj)
-seurat_obj_clean <- subset(seurat_obj, subset = Ann_lvl_2 %in% c('Bad-quality','Hb+'), invert = TRUE)
+# seurat_obj_path <- ifelse(!is.null(sub_dir), here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+# seurat_obj <- qs_read(seurat_obj_path)
+# seurat_obj_clean <- subset(seurat_obj, subset = Ann_lvl_2 %in% c('Bad-quality','Hb+'), invert = TRUE)
 # seurat_obj_clean_P <- seurat_processing_manual(seurat_obj_clean, reduction_name = 'clean') # sample_name, 2000, 30, 3
 # qs_save(seurat_obj_clean_P,here('Glioma_Project/03_seurat_objects/Processed_Clean.qs2'))
 seurat_obj_clean_P <- qs_read(here('Glioma_Project/03_seurat_objects/Processed_Clean.qs2'))
-p2 <-.seurat_dimplot(seurat_obj_clean_P, reduction = 'umap.harmony.clean',label = T, title = 'Ann_lvl_2',group = 'Ann_lvl_2', pt.size = 1) #+ theme(legend.position = 'none')
-metadf <- seurat_obj_clean@meta.data %>% group_by(Ann_lvl_2,Ann_lvl_1H,sample_name) %>% summarise(count = n()) %>% group_by(sample_name) %>% mutate(percentage = (count / sum(count) )* 100 )
-metadf$Ann_lvl_1H %>% table()
-seurat_obj_clean@meta.data[,c('sample_name','Ann_lvl_1H')] %>% table()
-
-## Ratios to compute:
-## T-cells to Myeloid ratio
-## T-cells to DC fraction
-## Microglia to Macro/Mono 
-
-metadf <- seurat_obj_clean@meta.data %>% group_by(Ann_lvl_2,Ann_lvl_1H,sample_name) %>% summarise(count = n())
+meta_df <- seurat_obj_clean_P@meta.data
+meta_df[,c(9:30,38:40)] %>% distinct() -> new_df
+new_df %>% tibble::remove_rownames() -> distinct_meta
+check <- lapply(colnames(distinct_meta),\(c){if(class(distinct_meta[[c]]) == 'list'){distinct_meta[[c]] <- as.character(distinct_meta[[c]])} else {distinct_meta[[c]]} }) %>% as.data.frame()
+colnames(check) <- colnames(distinct_meta)
+check$sample_name <-  gsub('_','-',x =check$sample_name)
+metadf <- seurat_obj_clean_P@meta.data %>% group_by(Ann_lvl_2,Ann_lvl_1H,sample_name) %>% summarise(count = n())
 # Creating the totals.
 total_df <- metadf %>%  group_by(sample_name) %>% summarise(sample_count = sum(count)) %>% as.data.frame()
 total_df <- metadf %>% filter(Ann_lvl_1H %in% c('T-CD8+','T-CD4+','T-other','NK','T-Prolif')) %>% group_by(sample_name) %>% summarise(Tcellcount = sum(count)) %>% as.data.frame() %>% right_join(total_df, by = 'sample_name')
@@ -179,16 +174,21 @@ total_df[is.na(total_df)] <- 0
 total_df[['T_cells_Myeloid']] <- (total_df[['Tcellcount']] / total_df[['Mcellcount']])
 total_df[['T_cells_Microglia']] <- (total_df[['Tcellcount']] / total_df[['Microglia']])
 total_df[['T_cells_Macro_Mono']] <- (total_df[['Tcellcount']] / total_df[['Macro_mono']])
-
 total_df[['T_cells_DC']] <- (total_df[['Tcellcount']] / total_df[['DC_count']])
 total_df[['Microglia_Macro_mono']] <- (total_df[['Microglia']] / total_df[['Macro_mono']])
 total_df[['DC_count_Microglia']] <- (total_df[['DC_count']] / total_df[['Microglia']])
+total_df[['Tcell_prop']] <-  (total_df[['Tcellcount']] / total_df[['sample_count']])
+total_df[['Mcell_prop']] <-  (total_df[['Mcellcount']] / total_df[['sample_count']])
+total_df[['DC_prop']] <-  (total_df[['DC_count']] / total_df[['sample_count']])
+total_df[['Microglia_prop']] <-  (total_df[['Microglia']] / total_df[['sample_count']])
+total_df[['Macro_mono_prop']] <-  (total_df[['Macro_mono']] / total_df[['sample_count']])
+total_df$sample_name <-  gsub('_','-',x =total_df$sample_name)
 ```
 
 ```{r}
-total_df$sample_name <-  gsub('_','-',x =total_df$sample_name)
+res_mlm <- res_mlm |> left_join(check,by = join_by(condition == sample_name))
 res_mlm_final <- res_mlm |> left_join(total_df,by = join_by(condition == sample_name))
-p <- lapply(colnames(total_df)[2:13], \(col){
+p <- lapply(colnames(total_df)[-1], \(col){
     plot <- res_mlm_final %>% ggpubr::ggscatter(x = as.character(col), y = 'score',
         add = 'reg.line',
         add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line    conf.int = TRUE, # Add confidence interval
@@ -200,12 +200,12 @@ p <- lapply(colnames(total_df)[2:13], \(col){
         panel.labs.background = list(fill = "grey", color = "grey"), panel.labs.font = list(size = 13, color = 'black'))
     return(plot)
 })
-pdf(here('Glioma_Project/04_figs/significance_ratios_SUBtype.pdf'), width = 8, height = 15)
+pdf(here('Glioma_Project/04_figs/02_significance_ratios_SUBtype.pdf'), width = 8, height = 15)
 p
 dev.off()
 
 
-p2 <- lapply(colnames(total_df)[2:13], \(col){
+p2 <- lapply(colnames(total_df)[-1], \(col){
     plot <- res_mlm_final %>% ggpubr::ggscatter(x = as.character(col), y = 'score',
         add = 'reg.line',
         add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line    conf.int = TRUE, # Add confidence interval
@@ -217,7 +217,7 @@ p2 <- lapply(colnames(total_df)[2:13], \(col){
         panel.labs.background = list(fill = "grey", color = "grey"), panel.labs.font = list(size = 13, color = 'black'))
     return(plot)
 })
-pdf(here('Glioma_Project/04_figs/significance_ratios_IDH.pdf'), width = 8, height = 12)
+pdf(here('Glioma_Project/04_figs/02_significance_ratios_IDH.pdf'), width = 8, height = 12)
 p2
 dev.off()
 # col <- colnames(total_df[2])
@@ -228,58 +228,6 @@ dev.off()
 
 ```
 
-```{r trying some statistical tests continous}
-res_mlm_final$cells_nuclei <- NULL
-res_mlm_final$pool_correct <- NULL
-res_mlm_final$age_at_surgery <- NULL
-res_mlm_final$age_at_surgery_correct <- as.numeric(res_mlm_final$age_at_surgery_correct)
-
-# str(res_mlm_final)
-columns_to_check <- unlist(lapply(colnames(res_mlm_final)[7:38], \(col){
-    vec <- res_mlm_final[[col]]
-    if (is.character(vec) && length(unique(vec) > 1)){
-        print(col)
-    }
-}))
-
-columns_to_check <- columns_to_check[-which(columns_to_check == 'cell_het_paper_id')]
-
-res_mlm_final$source_group <- paste0('source_')
-
-list_testing <- lapply(columns_to_check, \(col){ 
-    result <- ggpubr::compare_means(as.formula(paste0('score ~ ',as.character(col))),res_mlm_final,group.by = 'source')
-    result$comparison <- as.character(col)
-    return(result)
-})
-
-testing_object <- do.call(rbind,list_testing)
-testing_object %>% as.data.frame() %>% filter(p.adj < 0.05) %>% gt::gt()
-
-columns_to_check_continous <- unlist(lapply(colnames(res_mlm_final)[7:38], \(col){
-    vec <- res_mlm_final[[col]]
-    if (is.numeric(vec) && length(unique(vec) > 1)){
-        print(col)
-    }
-}))
-
-options(na.action = na.omit)
-result_dfs <- lapply(columns_to_check_continous, \(col){
-    result_list <- lapply(unique(res_mlm_final_c$source),\(group){
-        data <- res_mlm_final_c[res_mlm_final_c$source == group,]
-        data <- data[!(data[[col]]) > 10000000,] # Getting rid of inf`
-        result <- lm(data = data,as.formula(paste0('score ~ ',as.character(col))))
-        df <- data.frame(group =  group,
-            'R-squared' = summary(result)$r.squared,
-            'p_value' = summary(result)$coefficients[2,4])
-        return(df)
-    })
-    final_df <- do.call(rbind,result_list)
-    final_df$comparison <- col
-    return(final_df)
-})
-result_df <- do.call(rbind,result_dfs)
-result_df %>% filter(R.squared > 0.4) %>% filter(p_value < 0.05 )
-```
 
 ```{r}
 # testing
@@ -305,7 +253,8 @@ pseudo_seurat <- AggregateExpression(seurat_obj_subset, assays = "RNA", return.s
 df_list <- lapply(names(gene_list), \(.){data.frame('source' = .,'target' = gene_list[[.]],'mor' = 1)})
 net <- do.call(rbind,df_list)
 mat <- pseudo_seurat[["RNA"]]$counts
-
+net$target %>% unique()
+net$target
 res_mlm <- decoupleR::run_mlm(
     mat = mat,
     network = net,
@@ -344,8 +293,6 @@ ggsave(here('Glioma_Project/04_figs/DecouplR_results.pdf'))
 ```
 
 ```{r old}
-
-
 # old <- list(
 #   BD = c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "MRC1", "CD163", "SELENOP", "SLC40A1", "CXCR4"),
 #   MG = c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "MRC1", "FOLR2", "CD163", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
@@ -414,10 +361,10 @@ obj$`True_Anti_inflammation` <- (scales::rescale(obj$Anti_Inflam_UCell)  - scale
 new_cols <- c('True_Infiltration','True_Residence','True_Inflammation','True_Anti_inflammation')
 old_cols <- c('Systemic inflammatory_UCell','Microglial inflammatory_UCell','Anti_Inflam_UCell','Resident_UCell','Infiltrating_UCell')
 
-cutoff_infl_p <- median(obj$True_Inflammation) + sd(obj$True_Inflammation)
-cutoff_infl_n <- median(obj$True_Inflammation) - sd(obj$True_Inflammation)
-cutoff_infi_p <- median(obj$True_Infiltration) + sd(obj$True_Infiltration)
-cutoff_infi_n <- median(obj$True_Infiltration) - sd(obj$True_Infiltration)
+cutoff_infl_p <- median(obj$True_Inflammation) + 0.5*sd(obj$True_Inflammation)
+cutoff_infl_n <- median(obj$True_Inflammation) - 0.5*sd(obj$True_Inflammation)
+cutoff_infi_p <- median(obj$True_Infiltration) + 0.5*sd(obj$True_Infiltration)
+cutoff_infi_n <- median(obj$True_Infiltration) - 0.5*sd(obj$True_Infiltration)
 obj@meta.data <- obj@meta.data %>% mutate(Infiltration_cells = case_when(
     True_Infiltration > cutoff_infl_p ~ "Infiltrating",
     True_Infiltration < cutoff_infl_n ~ "Resident",
@@ -429,44 +376,69 @@ obj@meta.data <- obj@meta.data %>% mutate(Infiltration_cells = case_when(
         )) 
 obj$Inflammatory_cells <- factor(obj$Inflammatory_cells,levels = c('Anti_inflammatory','Average','Inflammatory'))
 obj$Infiltration_cells <- factor(obj$Infiltration_cells,levels = c('Resident','Average','Infiltrating'))
+qs_save(obj,here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
 ```
 
-```{r }
+```{r determining orderings }
+reduction_name <- 'M_M'
+obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
 
-# for (i in vec) {
-  freq_table <- seurat_obj@meta.data %>%
-    group_by(!!sym(i), sample_name, Ann_lvl_1H) %>%
-    summarise(count = n()) %>%
-    group_by(!!sym(i), sample_name) %>%
-    mutate(prop = count / sum(count) * 100) %>%
-    ungroup()
-
-  # Extract Mg_Inflam percentages per sample
-  ordering <- freq_table %>%
-    filter(Ann_lvl_1H == "Microglia") %>%
-    arrange(desc(prop)) %>% # highest first
-    pull(sample_name)
-  # Apply this ordering to the Sample column
-  freq_table$sample_name <- factor(freq_table$sample_name, levels = ordering)
-  freq_table$variable <- freq_table[[i]]
-  freq_table %>%
-    ggplot(aes(fill = Ann_lvl_1H, y = prop, x = sample_name)) +
-    geom_bar(position = "stack", stat = "identity") +
-    theme_classic() +
-    scale_fill_manual(values = unlist(cell_colors_2)) +
-    RotatedAxis() +
-    scale_y_continuous(expand = c(0, 0)) +
-    labs(x = "Patient", y = "Percentage", fill = "Cell Type", title = i) +
-    facet_grid(. ~ variable, scales = "free", space = "free") + # , strip = strip) +
-    theme(plot.margin = unit(c(1, 1, 1, 2), "cm"))
-  ggsave(here(fig_path, paste0("Ann_lvl_1H_", i, "_dittoseq_barplot.png")), width = 15, height = 10, dpi = 450)
-}
+col <- c('Inflammatory_cells' = 'Inflammatory','Infiltration_cells' = 'Infiltrating','Ann_lvl_1H' = 'Microglia') 
+order_list <- lapply(names(col), \(i){
+    freq_table <- obj@meta.data %>%
+        group_by(!!sym(i), sample_name) %>%
+        summarise(count = n()) %>%
+        group_by(sample_name) %>%
+        mutate(prop = count / sum(count) * 100) %>%
+        ungroup()
+    order <- freq_table %>%
+        filter(!!sym(i) == col[i]) %>%
+        arrange(desc(prop)) %>% # highest first
+        pull(sample_name)
+})
+names(order_list) <- col
+order_list[['Infiltrating']] <- c(order_list[['Infiltrating']],'ASTR_2020_041_frozen_cells')
 ```
 
-
+```{r plotting}
+#Objects
+# reduction_name <- 'M_M'
+# reduction_name <- 'M'
+# reduction_name <- 'T'
+# reduction_name <- 'Clean'
+# obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+c16 <- c("dodgerblue2", "#E31A1C", "green4", "#6A3D9A", "#FF7F00", "black", "gold1", "skyblue2", "palegreen2", "#FDBF6F", "gray70", "maroon", "orchid1", "darkturquoise", "darkorange4", "brown")
+c25 <- c("dodgerblue2", "#E31A1C", "green4","#6A3D9A", "#FF7F00", "black", "gold1","skyblue2", "#FB9A99","palegreen2","#CAB2D6", "#FDBF6F",  "gray70", "khaki2","maroon", "orchid1", "deeppink1", "blue1", "steelblue4","darkturquoise", "green1", "yellow4", "yellow3","darkorange4", "brown")
+reduction_name <- 'M'
+obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+variable_col <- 'Ann_lvl_1H'
+lapply(names(col), \(i){
+    freq_table <- obj@meta.data %>%
+        group_by(!!sym(variable_col), sample_name) %>%
+        summarise(count = n()) %>%
+        group_by(sample_name) %>%
+        mutate(prop = count / sum(count) * 100) %>%
+        ungroup()
+    freq_table$sample_name <- factor(freq_table$sample_name, levels = order_list[[col[i]]])
+    freq_table$variable <- freq_table[[variable_col]]
+    p1 <- freq_table %>%
+        ggplot(aes(fill = variable, y = prop, x = sample_name)) +
+        geom_bar(position = "stack", stat = "identity") +
+        theme_classic() +
+        # scale_fill_brewer(palette = 'Set2')+
+        scale_fill_manual(values = c16[1:length(unique(freq_table$variable))])+
+        RotatedAxis() +
+        scale_y_continuous(expand = c(0, 0)) +
+        labs(x = "Patient", y = "Percentage", fill = "Cell Type", title = col[i]) +
+        # facet_grid(. ~ variable, scales = "free", space = "free") + # , strip = strip) +
+        theme(plot.margin = unit(c(1, 1, 1, 2), "cm")) + geom_hline(yintercept = c(25,50,75), colour = 'red',linetype = 'dashed')
+    return(p1)
+}) |> wrap_plots() + plot_layout(guides = 'collect', axes = 'collect')
+ggsave(here(fig_path,paste0(reduction_name,'_',variable_col,'_composition_test.pdf')),width = 30, height = 10)
+```
 
 ```{r plotting the results}
-pdf(here('Glioma_Project/04_figs/Test_signature.pdf'),width = 15, height = 10)
+pdf(here('Glioma_Project/04_figs/Test_signature_2.pdf'),width = 15, height = 10)
 plot_list <- lapply(old_cols, \(i){
     p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
     x_axis_theme + ggtitle(i)
@@ -510,17 +482,149 @@ dev.off()
 
 ```{r}
 reduction_name <- 'M_M'
-seurat_obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
-pseudo_seurat <- AggregateExpression(seurat_obj_subset, assays = "RNA", return.seurat = T, group.by = c("sample_name",'Ann_lvl_1H'))
+obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+pseudo_seurat <- AggregateExpression(obj, assays = "RNA", return.seurat = T, group.by = c("sample_name"))
+pseudo_seurat <- NormalizeData(pseudo_seurat)
+mat <- pseudo_seurat[["RNA"]]$data
+
+
+df <-data.frame('source' ='True_Infiltration', 'target' = gene_list[['Infiltrating']], 'mor' = 1 )
+df <- rbind(df,data.frame('source' ='True_Infiltration', 'target' = gene_list[['Resident']], 'mor' = -1 ))
+df <- rbind(df,data.frame('source' ='True_Inflammation', 'target' = gene_list[['Microglial inflammatory']], 'mor' = 1 ))
+net <- rbind(df,data.frame('source' ='True_Inflammation', 'target' = gene_list[['Anti_Inflam']], 'mor' = -1 ))
 df_list <- lapply(names(gene_list), \(.){data.frame('source' = .,'target' = gene_list[[.]],'mor' = 1)})
-net <- do.call(rbind,df_list)
-mat <- pseudo_seurat[["RNA"]]$counts
+net2 <- do.call(rbind,df_list)
+
+# net <- do.call(rbind,df_list)
 
 res_mlm <- decoupleR::run_mlm(
-    mat = mat,
+    mat = pseudo_seurat[["RNA"]]$data,
     network = net,
     .source = "source",
     .target = "target",
     center = FALSE
 )
+res_mlm <- res_mlm |> left_join(check,by = join_by(condition == sample_name))
+res_mlm_final <- res_mlm |> left_join(total_df,by = join_by(condition == sample_name))
+```
+
+```{r}
+p <- lapply(colnames(total_df)[-1], \(col){
+    plot <- res_mlm_final %>% ggpubr::ggscatter(x = as.character(col), y = 'score',
+        add = 'reg.line',
+        add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line    conf.int = TRUE, # Add confidence interval
+        cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+        conf.int = TRUE, # Add confidence interval
+        cor.coeff.args = list(method = "pearson", label.sep = "\n")
+    )  + x_axis_theme
+    plot <- ggpubr::facet(plot, facet.by = c('source','tumour_abbreviated'),scales = 'free',  short.panel.labs = T,   # Allow long labels in panels
+        panel.labs.background = list(fill = "grey", color = "grey"), panel.labs.font = list(size = 13, color = 'black'))
+    return(plot)
+})
+pdf(here('Glioma_Project/04_figs/03_significance_ratios_SUBtype.pdf'), width = 8, height = 15)
+p
+dev.off()
+
+
+p2 <- lapply(colnames(total_df)[-1], \(col){
+    plot <- res_mlm_final %>% ggpubr::ggscatter(x = as.character(col), y = 'score',
+        add = 'reg.line',
+        add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line    conf.int = TRUE, # Add confidence interval
+        cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+        conf.int = TRUE, # Add confidence interval
+        cor.coeff.args = list(method = "pearson")
+    )  + x_axis_theme
+    plot <- ggpubr::facet(plot, facet.by = c('source','IDH_status'),scales = 'free',  short.panel.labs = TRUE,  # Allow long labels in panels
+        panel.labs.background = list(fill = "grey", color = "grey"), panel.labs.font = list(size = 13, color = 'black'))
+    return(plot)
+})
+pdf(here('Glioma_Project/04_figs/03_significance_ratios_IDH.pdf'), width = 8, height = 12)
+p2
+dev.off()
+
+p_overview_IDH <- res_mlm_final %>% ggplot(mapping = aes(x = IDH_status, y = score))+
+    geom_boxplot()  + 
+    facet_wrap(~source,nrow = 1, scales = 'free_y')+
+    ggpubr::stat_compare_means(comparisons = list(c('wild_type','mutant')),label = 'p.signif',method = 'wilcox.test') +
+    theme_bw() + x_axis_theme 
+p_overview_tumour <- res_mlm_final %>% ggplot(mapping = aes(x = tumour_abbreviated, y = score))+
+    geom_boxplot()  + 
+    facet_wrap(~source,nrow = 1, scales = 'free_y')+
+    ggpubr::stat_compare_means(comparisons = list(c('ASTR','GBM'),c('ASTR','ODG'),c('GBM','ODG')),label = 'p.signif',method = 'wilcox.test') +
+    theme_bw() + x_axis_theme 
+pdf(here('Glioma_Project/04_figs/03_significance_testing_norm.pdf'), width = 9, height = 5)
+p_overview_IDH
+p_overview_tumour
+dev.off()
+```
+
+
+
+```{r trying some statistical tests continous}
+res_mlm_final$cells_nuclei <- NULL
+res_mlm_final$pool_correct <- NULL
+res_mlm_final$age_at_surgery <- NULL
+res_mlm_final$age_at_surgery_correct <- as.numeric(res_mlm_final$age_at_surgery_correct)
+
+# str(res_mlm_final)
+columns_to_check <- unlist(lapply(colnames(res_mlm_final)[7:38], \(col){
+    vec <- res_mlm_final[[col]]
+    if (is.character(vec) && length(unique(vec) > 1)){
+        print(col)
+    }
+}))
+
+columns_to_check <- columns_to_check[-which(columns_to_check == 'cell_het_paper_id')]
+
+# res_mlm_final$source_group <- paste0('source_',)
+
+list_testing <- lapply(columns_to_check, \(col){ 
+    result <- ggpubr::compare_means(as.formula(paste0('score ~ ',as.character(col))),res_mlm_final,group.by = 'source')
+    result$comparison <- as.character(col)
+    return(result)
+})
+
+testing_object <- do.call(rbind,list_testing)
+testing_object %>% as.data.frame() %>% filter(p.adj < 0.05) %>% gt::gt()
+
+columns_to_check_continous <- unlist(lapply(colnames(res_mlm_final)[7:38], \(col){
+    vec <- res_mlm_final[[col]]
+    if (is.numeric(vec) && length(unique(vec) > 1)){
+        print(col)
+    }
+}))
+res_mlm_final_c %>% colnames()
+columns_to_check_continous
+# options(na.action = na.omit)
+res_mlm_final_c <- res_mlm_final
+result_dfs <- lapply(columns_to_check_continous, \(col){
+    result_list <- lapply(unique(res_mlm_final_c$source),\(group){
+        data <- res_mlm_final_c[res_mlm_final_c$source == group,]
+        data <- data[!(data[[col]]) > 10000000,] # Getting rid of inf`
+        result <- lm(data = data,as.formula(paste0('score ~ ',as.character(col))))
+        df <- data.frame(column = col,
+            score =  group,
+            'R-squared' = summary(result)$r.squared,
+            'p_value' = summary(result)$coefficients[2,4])
+        return(df)
+    })
+    final_df <- do.call(rbind,result_list)
+    return(final_df)
+})
+result_df <- do.call(rbind,result_dfs)
+result_df %>% filter(R.squared > 0.4) %>% filter(p_value < 0.05 )
+```
+
+```{r}
+stats_df <- res_mlm_final_c %>%
+  pivot_longer(
+    cols = colnames(total_df)[-1], 
+    names_to = "variable", 
+    values_to = "value"
+  ) %>%
+  # 2. Group by your facets AND the variable column
+  group_by(variable, source, IDH_status) %>%
+  # 3. Run the correlation test
+  rstatix::cor_test(value, score, method = "pearson")
+stats_df %>% as.data.frame()
 ```
