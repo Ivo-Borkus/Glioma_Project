@@ -1,0 +1,306 @@
+
+---
+title: "Subsetting furthergit"
+author: "Ivo Borkus"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = T, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 10, fig.height = 10
+)
+knitr::render_markdown()
+```
+
+```{css, echo = F}
+pre code, pre, code {
+  white-space: pre !important;
+  overflow-x: scroll !important;
+  word-break: keep-all !important;
+  word-wrap: initial !important;
+}
+
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+```
+
+
+```{r loading libraries, include = FALSE}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(here)
+library(tidyr)
+library(patchwork)
+library(UCell)
+library(qs2)
+library(miloR)
+library(SingleCellExperiment)
+library(scater)
+source(here("Brain-Met_V2/functions.R"))
+source(here("Glioma_Project/Scripting/utils.R"))
+# source(here("External_data/Fastq_processing/metadata_functions.R"))
+```
+
+# Subsetting main myeloid lineages
+
+```{r}
+object_name <- "Harmony"
+reduction_name <- "Main_myeloid"
+Processed_name <- "Main_myeloid"
+sample_col <- "sample_name"
+
+
+# subsetting <- c("Cell_Type", c("Myeloid", "Dendritic cells", "Mast cells")) #  Subset-col, cells_of_interest
+subsetting <- c("Ann_lvl_2", c("Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active", "BAMs", "TAMs", "Ma-Inflam", "Ma-IFN", "Ma-Mt+", "Mono-Classic")) #  Subset-col, cells_of_interest
+# subsetting <- c("Ann_lvl_2", c("BAMs", "TAMs", "Ma-Inflam", "Ma-IFN", "Ma-Mt+", "Mono-Classic")) #  Subset-col, cells_of_interest
+
+norm_meth_scale <- c(F, "LogNormalize", 10000) # Perform log normalisatin, method, scale
+vf <- c("vst", 1000, FALSE, FALSE) # VF method, amount, use old vf method, silence VDJgenes using scRep
+scaling <- TRUE #
+var.to.regress <- NULL # supply the var to be regressed if valid
+harmony <- T # Run harmony or not
+n_PCS <- 50 # Amount of Pcs to include
+clustering <- c(TRUE, 4) # Perform clustering, Algorithm
+sub_dir <- NULL
+feature_vec_chosen <- Mgenes
+```
+
+
+### Loading of seurat
+```{r loading seurat object1}
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(object_name, ".qs2")), here(obj_path, paste0(object_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+# reduction_pca <- paste0("harmony_pca.", reduction_name)
+# reduction_umap <- paste0("umap.harmony.", reduction_name)
+```
+
+```{r processing myeloid main}
+seurat_obj <- .processing(
+  obj = seurat_obj,
+  reduction_name = reduction_name,
+  Processed_name = Processed_name,
+  subsetting = subsetting,
+  norm_meth_scale = norm_meth_scale,
+  vf = vf,
+  scaling = scaling,
+  var.to.regress = var.to.regress,
+  harmony = harmony,
+  n_PCS = n_PCS,
+  clustering = clustering
+)
+```
+
+### Loading of Processed seurat
+```{r }
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+reduction_pca <- paste0("harmony_pca.", reduction_name)
+reduction_umap <- paste0("umap.harmony.", reduction_name)
+```
+
+## Investigating object
+
+```{r}
+table(seurat_obj@meta.data$sample_name, seurat_obj@meta.data$tier_correct)
+seurat_obj@meta.data %>%
+  select(sample_name, tier_correct, tumour_full) %>%
+  distinct() %>%
+  select(tier_correct, tumour_full) %>%
+  table()
+
+
+seurat_obj@meta.data %>%
+  select(sample_name, grade, tumour_full) %>%
+  distinct() %>%
+  select(grade, tumour_full) %>%
+  table()
+
+# seurat_obj@meta.data$Ann_lvl_2 %>% table()
+```
+
+## Investigations_1
+
+```{r}
+plots <- .Running_plots(seurat_obj,
+  reduction_name = reduction_name, output_dir = fig_path,
+  harmony = harmony, umap_feature_vec = feature_vec_chosen, batch_cols = batch_cols
+)
+```
+
+
+```{r tabsetting1, results = 'asis', echo = F}
+.tabsetter(plots[[1]], overall_name = paste0("Processing plots: ", reduction_name), path = rmd_path)
+.tabsetter(plots[[2]], overall_name = paste0("Metadata plots: ", reduction_name), path = rmd_path)
+```
+
+
+
+# Mono / macrophage
+```{r}
+object_name <- "Main_myeloid"
+reduction_name <- "Mono_Macro"
+Processed_name <- "Mono_Macro"
+sample_col <- "sample_name"
+
+
+# subsetting <- c("Cell_Type", c("Myeloid", "Dendritic cells", "Mast cells")) #  Subset-col, cells_of_interest
+# subsetting <- c("Ann_lvl_2", c("Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active", "BAMs", "TAMs", "Ma-Inflam", "Ma-IFN", "Ma-Mt+", "Mono-Classic")) #  Subset-col, cells_of_interest
+subsetting <- c("Ann_lvl_2", c("BAMs", "TAMs", "Ma-Inflam", "Ma-IFN", "Ma-Mt+", "Mono-Classic")) #  Subset-col, cells_of_interest
+
+norm_meth_scale <- c(FALSE, "LogNormalize", 10000) # Perform log normalisatin, method, scale
+vf <- c("vst", 1000, FALSE, FALSE) # VF method, amount, use old vf method, silence VDJgenes using scRep
+scaling <- TRUE #
+var.to.regress <- NULL # supply the var to be regressed if valid
+harmony <- T # Run harmony or not
+n_PCS <- 50 # Amount of Pcs to include
+clustering <- c(TRUE, 4) # Perform clustering, Algorithm
+sub_dir <- NULL
+feature_vec_chosen <- Mgenes
+```
+
+### Loading of seurat
+```{r}
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(object_name, ".qs2")), here(obj_path, paste0(object_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+# reduction_pca <- paste0("harmony_pca.", reduction_name)
+# reduction_umap <- paste0("umap.harmony.", reduction_name)
+```
+
+```{r processing mono-macro}
+seurat_obj <- .processing(
+  obj = seurat_obj,
+  reduction_name = reduction_name,
+  Processed_name = Processed_name,
+  subsetting = subsetting,
+  norm_meth_scale = norm_meth_scale,
+  vf = vf,
+  scaling = scaling,
+  var.to.regress = var.to.regress,
+  harmony = harmony,
+  n_PCS = n_PCS,
+  clustering = clustering
+)
+```
+
+### Loading of Processed seurat
+```{r preprocessing seurat object_2}
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+reduction_pca <- paste0("harmony_pca.", reduction_name)
+reduction_umap <- paste0("umap.harmony.", reduction_name)
+```
+
+
+
+## Investigations_2
+
+```{r}
+plots <- .Running_plots(seurat_obj,
+  reduction_name = reduction_name, output_dir = fig_path,
+  harmony = harmony, umap_feature_vec = feature_vec_chosen, batch_cols = batch_cols
+)
+```
+
+
+```{r tabsetting2, results = 'asis', echo = F}
+.tabsetter(plots[[1]], overall_name = paste0("Processing plots: ", reduction_name), path = rmd_path)
+.tabsetter(plots[[2]], overall_name = paste0("Metadata plots: ", reduction_name), path = rmd_path)
+```
+
+
+
+# Microglia
+
+```{r}
+object_name <- "Main_myeloid"
+reduction_name <- "Microglia"
+Processed_name <- "Microglia"
+sample_col <- "sample_name"
+
+
+# subsetting <- c("Cell_Type", c("Myeloid", "Dendritic cells", "Mast cells")) #  Subset-col, cells_of_interest
+# subsetting <- c("Ann_lvl_2", c("Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active", "BAMs", "TAMs", "Ma-Inflam", "Ma-IFN", "Ma-Mt+", "Mono-Classic")) #  Subset-col, cells_of_interest
+subsetting <- c("Ann_lvl_2", c("Mg_classic", "Mg_Inflam", "Mg_Anti-Inflam", "Mg_PLCG2", "Mg_active")) #  Subset-col, cells_of_interest
+
+norm_meth_scale <- c(FALSE, "LogNormalize", 10000) # Perform log normalisatin, method, scale
+vf <- c("vst", 1000, FALSE, FALSE) # VF method, amount, use old vf method, silence VDJgenes using scRep
+scaling <- TRUE #
+var.to.regress <- NULL # supply the var to be regressed if valid
+harmony <- T # Run harmony or not
+n_PCS <- 50 # Amount of Pcs to include
+clustering <- c(TRUE, 4) # Perform clustering, Algorithm
+sub_dir <- NULL
+feature_vec_chosen <- Mgenes
+```
+
+
+### Loading of seurat
+```{r }
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(object_name, ".qs2")), here(obj_path, paste0(object_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+# reduction_pca <- paste0("harmony_pca.", reduction_name)
+# reduction_umap <- paste0("umap.harmony.", reduction_name)
+```
+
+```{r Processing microglia}
+seurat_obj <- .processing(
+  obj = seurat_obj,
+  reduction_name = reduction_name,
+  Processed_name = Processed_name,
+  subsetting = subsetting,
+  norm_meth_scale = norm_meth_scale,
+  vf = vf,
+  scaling = scaling,
+  var.to.regress = var.to.regress,
+  harmony = harmony,
+  n_PCS = n_PCS,
+  clustering = clustering
+)
+```
+
+### Loading of Processed seurat
+```{r preprocessing seurat object3}
+seurat_obj_path <- ifelse(length(sub_dir) > 0, here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+seurat_obj <- qs_read(seurat_obj_path)
+.size(seurat_obj)
+reduction_pca <- paste0("harmony_pca.", reduction_name)
+reduction_umap <- paste0("umap.harmony.", reduction_name)
+```
+
+
+## Investigations
+
+```{r}
+plots <- .Running_plots(seurat_obj,
+  reduction_name = reduction_name, output_dir = fig_path,
+  harmony = harmony, umap_feature_vec = feature_vec_chosen, batch_cols = batch_cols
+)
+```
+
+
+```{r tabsetting3, results = 'asis', echo = F}
+.tabsetter(plots[[1]], overall_name = paste0("Processing plots: ", reduction_name), path = rmd_path)
+.tabsetter(plots[[2]], overall_name = paste0("Metadata plots: ", reduction_name), path = rmd_path)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
