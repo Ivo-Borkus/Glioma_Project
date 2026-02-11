@@ -70,22 +70,6 @@ batch_cols <- c(
   "Primary_or_Recurrent", "Previous_Surgery", "Radiotherapy", "Chemotherapy", "MGMT_Methylation"
 )
 continous_cols <- c("nCount_RNA", "nFeature_RNA", "percent.mt", "age_at_surgery_correct", "nuclear_fraction")
-
-
-# subsetting <- c("Cell_Type", c("Myeloid", "Dendritic cells", "Mast cells")) #  Subset-col, cells_of_interest
-subsetting <- c(NULL, NULL) #  Subset-col, cells_of_interest
-
-norm_meth_scale <- c(TRUE, "LogNormalize", 10000) # Perform log normalisatin, method, scale
-vf <- c("vst", 2000, FALSE, FALSE) # VF method, amount, use old vf method, silence VDJgenes using scRep
-scaling <- TRUE # w
-var.to.regress <- NULL # supply the var to be regressed if valid
-harmony <- T # Run harmony or not
-n_PCS <- 50 # Amount of Pcs to include
-clustering <- c(TRUE, 4) # Perform clustering, Algorithm
-sub_dir <- NULL
-
-
-feature_vec_chosen <- feature_vec_overall
 ```
 
 # To Do
@@ -96,7 +80,6 @@ Then if you want to add significance you could either average the scores by pati
 or pseudobulk only myeloid per patient and score at a pseudobulk level (I would prefer this approach), 
 then you can apply a max rank sum test on the score per patient between groups (disease/IDH-status...).
 ```{r pro anti sign, eval = T}
-immune_markers
 # Four principal immunomodulatory programs
 # https://www.nature.com/articles/s41586-025-08633-8
 # Programs, origins and immunomodulatory functions of myeloid cells in glioma
@@ -111,48 +94,8 @@ gene_list <- list(
     'Resident' = MG,
     'Infiltrating' = BD
 )
-# obj <- AddModuleScore_UCell(obj,
-#     features = gene_list
-# )
-
-#  (or CD206 CD204),
 ```
 
-```{r trying some signatures on UMAP}
-reduction_name <- 'M_M'
-obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
-Ucell_cols <- colnames(obj@meta.data)[obj@meta.data %>% colnames() %>% grep('UCell',.)]
-obj$`Infiltration-Residence` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
-model <- lm(`Microglial inflammatory_UCell` ~  `Systemic inflammatory_UCell`, data = obj@meta.data)
-p_scatter <- ggplot(data = obj@meta.data, mapping = aes(x = `Microglial inflammatory_UCell`, y = `Systemic inflammatory_UCell`, colour = Ann_lvl_1H)) + ggrastr::rasterise(geom_point()) + 
-    annotate('text', x = 0.1,y = 0.8, label = paste0('R-squared: ', as.character(round(summary(model)$r.squared,2))))
-cols <- c(Ucell_cols[15:16],'Infiltration-Residence')
-plot_list <- lapply(cols, \(i){
-    p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
-    x_axis_theme + ggtitle(i)
-})
-p <- plot_list |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
-
-cols_2 <-  c(Ucell_cols[14:18],'Infiltration-Residence')
-plot_list_2 <- lapply(cols_2, \(i){
-    p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
-    x_axis_theme + ggtitle(i)
-})
-pextra <- plot_list_2 |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
-# obj@meta.data %>% colnames()
-cols_3 <-  c('log_nCount_RNA','log_nFeature_RNA','percent_mt')
-plot_list_3 <- lapply(cols_3, \(i){
-    p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
-    x_axis_theme + ggtitle(i)
-})
-pqc <- plot_list_3 |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
-
-pdf(here('Glioma_Project/04_figs/01_Signature_violins.pdf'), width = 15, height = 10)
-p
-pextra
-pqc
-dev.off()
-```
 
 ```{r}
 # Doing some comparisons:
@@ -440,4 +383,144 @@ sessionInfo()
 
 ```{r,eval = F}
 rmarkdown::render(here::here('Glioma_Project/Scripting/03-02-2026_testing.rmd'), output_dir = here::here('Glioma_Project/02_knits'),output_file = "Anno_investigations.html")
+```
+
+
+
+### plan
+
+DecoupleR:
+1. Determine signature of M_M populations by a select portion. (Microglia Inflammatory/True_residence/True_infiltrating/Anti_Inflammatory)
+2. Order samples by their environment like scores.
+3. Determine by the use of a signature if a cell is truly resident like, or truly Infiltrating
+    1. Do the same for the inflammation and Anti_Inflammatory
+4. Include T-reg information so show the order of samples by their environment in the myleoid populatin and then show T-cell comp.
+5. Perform significance testing by extracting only meaningfull signficance.
+6. add other information to see whethere this might explain very well the environment.
+
+
+
+# Determining signatures in populations by a threshold
+
+```{r trying some signatures on UMAP}
+reduction_name <- 'M_M'
+obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+Ucell_cols <- colnames(obj@meta.data)[obj@meta.data %>% colnames() %>% grep('UCell',.)]
+# obj$`Infiltration-Residence` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
+obj$`True_Infiltration` <- (scales::rescale(obj$Infiltrating_UCell)  - scales::rescale(obj$Resident_UCell)) # so they are scaled
+obj$`True_Residence` <- (scales::rescale(obj$Resident_UCell)  - scales::rescale(obj$Infiltrating_UCell)) # so they are scaled
+obj$`True_Inflammation` <- (scales::rescale(obj$`Microglial inflammatory_UCell`)  - scales::rescale(obj$Anti_Inflam_UCell)) # so they are scaled
+obj$`True_Anti_inflammation` <- (scales::rescale(obj$Anti_Inflam_UCell)  - scales::rescale(obj$`Microglial inflammatory_UCell`)) # so they are scaled
+new_cols <- c('True_Infiltration','True_Residence','True_Inflammation','True_Anti_inflammation')
+old_cols <- c('Systemic inflammatory_UCell','Microglial inflammatory_UCell','Anti_Inflam_UCell','Resident_UCell','Infiltrating_UCell')
+
+cutoff_infl_p <- median(obj$True_Inflammation) + sd(obj$True_Inflammation)
+cutoff_infl_n <- median(obj$True_Inflammation) - sd(obj$True_Inflammation)
+cutoff_infi_p <- median(obj$True_Infiltration) + sd(obj$True_Infiltration)
+cutoff_infi_n <- median(obj$True_Infiltration) - sd(obj$True_Infiltration)
+obj@meta.data <- obj@meta.data %>% mutate(Infiltration_cells = case_when(
+    True_Infiltration > cutoff_infl_p ~ "Infiltrating",
+    True_Infiltration < cutoff_infl_n ~ "Resident",
+    .default = 'Average'
+    )) %>% mutate(Inflammatory_cells =case_when(
+            True_Inflammation < cutoff_infl_n ~ "Anti_inflammatory",
+            True_Inflammation > cutoff_infl_p ~ "Inflammatory",
+            .default = 'Average' 
+        )) 
+obj$Inflammatory_cells <- factor(obj$Inflammatory_cells,levels = c('Anti_inflammatory','Average','Inflammatory'))
+obj$Infiltration_cells <- factor(obj$Infiltration_cells,levels = c('Resident','Average','Infiltrating'))
+```
+
+```{r }
+
+# for (i in vec) {
+  freq_table <- seurat_obj@meta.data %>%
+    group_by(!!sym(i), sample_name, Ann_lvl_1H) %>%
+    summarise(count = n()) %>%
+    group_by(!!sym(i), sample_name) %>%
+    mutate(prop = count / sum(count) * 100) %>%
+    ungroup()
+
+  # Extract Mg_Inflam percentages per sample
+  ordering <- freq_table %>%
+    filter(Ann_lvl_1H == "Microglia") %>%
+    arrange(desc(prop)) %>% # highest first
+    pull(sample_name)
+  # Apply this ordering to the Sample column
+  freq_table$sample_name <- factor(freq_table$sample_name, levels = ordering)
+  freq_table$variable <- freq_table[[i]]
+  freq_table %>%
+    ggplot(aes(fill = Ann_lvl_1H, y = prop, x = sample_name)) +
+    geom_bar(position = "stack", stat = "identity") +
+    theme_classic() +
+    scale_fill_manual(values = unlist(cell_colors_2)) +
+    RotatedAxis() +
+    scale_y_continuous(expand = c(0, 0)) +
+    labs(x = "Patient", y = "Percentage", fill = "Cell Type", title = i) +
+    facet_grid(. ~ variable, scales = "free", space = "free") + # , strip = strip) +
+    theme(plot.margin = unit(c(1, 1, 1, 2), "cm"))
+  ggsave(here(fig_path, paste0("Ann_lvl_1H_", i, "_dittoseq_barplot.png")), width = 15, height = 10, dpi = 450)
+}
+```
+
+
+
+```{r plotting the results}
+pdf(here('Glioma_Project/04_figs/Test_signature.pdf'),width = 15, height = 10)
+plot_list <- lapply(old_cols, \(i){
+    p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
+    x_axis_theme + ggtitle(i)
+})
+plot_list2 <- lapply(new_cols, \(i){
+    p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
+    x_axis_theme + ggtitle(i)
+})
+cols_3 <-  c('log_nCount_RNA','log_nFeature_RNA','percent_mt')
+plot_list_3 <- lapply(cols_3, \(i){
+    p <- ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
+    x_axis_theme + ggtitle(i)
+})
+
+plot_list |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
+plot_list2 |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
+plot_list_3 |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
+## Inflammatory Old sig
+lapply(old_cols, \(i){
+    p <- ggplot(obj@meta.data, mapping = aes(x = Inflammatory_cells, y = !!sym(i)))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
+    x_axis_theme + ggtitle(i)
+}) |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
+## Inflammatory new sig
+lapply(new_cols, \(i){
+    p <- ggplot(obj@meta.data, mapping = aes(x = Inflammatory_cells, y = !!sym(i)))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
+    x_axis_theme + ggtitle(i)
+}) |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
+## Infiltratin Old sig
+lapply(old_cols, \(i){
+    p <- ggplot(obj@meta.data, mapping = aes(x = Infiltration_cells, y = !!sym(i)))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
+    x_axis_theme + ggtitle(i)
+}) |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect') + wrap_table(table(obj$Infiltration_cells,obj$Inflammatory_cells) %>% as.data.frame.matrix() %>% gt::gt(rownames_to_stub = TRUE))
+## Infiltratin new sig
+lapply(new_cols, \(i){
+    p <- ggplot(obj@meta.data, mapping = aes(x = Infiltration_cells, y = !!sym(i)))+ ggrastr::rasterise(geom_violin()) + ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5))+
+    x_axis_theme + ggtitle(i)
+}) |> wrap_plots(ncol = 2) + plot_layout(guides = 'collect',axes = 'collect')
+dev.off()
+```
+
+
+```{r}
+reduction_name <- 'M_M'
+seurat_obj <- qs_read(here(paste0('Glioma_Project/03_seurat_objects/Processed_',reduction_name,'.qs2')))
+pseudo_seurat <- AggregateExpression(seurat_obj_subset, assays = "RNA", return.seurat = T, group.by = c("sample_name",'Ann_lvl_1H'))
+df_list <- lapply(names(gene_list), \(.){data.frame('source' = .,'target' = gene_list[[.]],'mor' = 1)})
+net <- do.call(rbind,df_list)
+mat <- pseudo_seurat[["RNA"]]$counts
+
+res_mlm <- decoupleR::run_mlm(
+    mat = mat,
+    network = net,
+    .source = "source",
+    .target = "target",
+    center = FALSE
+)
 ```
