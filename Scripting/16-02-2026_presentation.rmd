@@ -1,0 +1,235 @@
+---
+title: "Current status check"
+author: "Ivo Borkus"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = T, message = FALSE, warning = FALSE,
+    fig.align = "center", fig.width = 10, fig.height = 10
+)
+knitr::render_markdown()
+```
+
+```{css, echo = F}
+pre code, pre, code {
+  white-space: pre !important;
+  overflow-x: scroll !important;
+  word-break: keep-all !important;
+  word-wrap: initial !important;
+}
+
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+```
+```{r loading libraries, include = FALSE}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(here)
+library(tidyr)
+library(patchwork)
+library(UCell)
+library(qs2)
+library(future)
+plan(sequential)
+options(future.globals.maxSize = 100000 * 1024^2)
+# source(here("Brain-Met_V2/functions.R"))
+source(here("Glioma_Project/Scripting/utils.R"))
+source(here("Glioma_Project/Scripting/functions.R"))
+# source(here("External_data/Fastq_processing/metadata_functions.R"))
+```
+
+```{r pro anti sign, eval = T}
+# Four principal immunomodulatory programs
+# https://www.nature.com/articles/s41586-025-08633-8
+# Programs, origins and immunomodulatory functions of myeloid cells in glioma
+# Cel reports medicine Juan nieto:
+# Tumor heterogeneity and tumor-microglia interactions in primary and recurrent IDH1-mutant gliomass
+BD <- c("LYZ", "EREG", "S100A8", "S100A9", "ITGAL", "ITGA4", "PTPRC", "FCGR3A", "CEBPD", "EGR2", "IRF4", "RUNX1", "STAT3", "CCL22", "CXCL2", "CD14", "S100A4", "S100A6", "FCN1", "VCAN", "CD36", "LGALS3", "SELENOP", "SLC40A1", "CXCR4")
+MG <- c("P2RY12", "CX3CR1", "CSF1R", "AXL", "TMEM119", "CD84", "CSF3R", "ELMO1", "MEF2A", "BIN1", "SCIN", "FCGBP", "OLFML3", "NAV3", "SALL1", "SIGLEC8", "SLC1A3", "ITGAM", "TREM2", "PROS1", "SPARC", "PLCL1", "VIM", "APOE", "SMAD3", "P2RX7", "LYVE1", "MS4A7", "FOLR2", "HLA-DRA", "TIMD4", "ADGRG1", "TGFBI", "CD74")
+gene_list <- list(
+    "Systemic inflammatory" = c("IL1B", "IL1A", "CCL2", "TNF", "OSM", "CXCL8", "CD83", "CCL4", "CCL3", "CD74"),
+    "Microglial inflammatory" = c("CXCR4", "CXCL12", "CCL3", "CCL5", "CX3CR1", "RHOB", "JUN", "KLF2", "EGR1", "PDK4", "P2RY13", "ICAM1", "RELB", "TNFAIP3"),
+    "Anti_Inflam" = c("MRC1", "MSR1", "CD163", "LYVE1", " COLEC12", "STAB1", "NRP1", "RNASE1", "CTSB", "VSIG4", "SELENOP"),
+    "Resident" = MG,
+    "Infiltrating" = BD
+)
+```
+
+```{r}
+reduction_name <- "M_M"
+obj <- qs_read(here(paste0("Glioma_Project/03_seurat_objects/Processed_", reduction_name, ".qs2")))
+p_overview1 <- DimPlot(obj,group.by = c('Ann_lvl_1H'), reduction = 'harmony_umap.M_M') + scale_colour_brewer(palette = 'Set2')
+p_overview2 <- DimPlot(obj,group.by = c('Ann_lvl_2'),cols = c16[1:length(unique(obj$Ann_lvl_2))], reduction = 'harmony_umap.M_M') 
+p_overview <- (p_overview1 + p_overview2)
+p_signature <- FeaturePlot(obj,features = c('True_Infiltration'),reduction = 'harmony_umap.M_M') + labs(title = 'Infiltration Signature')
+p_signature2 <- FeaturePlot(obj,features = 'True_Inflammation',reduction = 'harmony_umap.M_M') + labs(title = 'Inflammation Signature')
+p_signatures <- (p_signature | p_signature2) &  scale_colour_gradientn(colours = rev(RColorBrewer::brewer.pal(n = 11, name = "RdBu"))) 
+p <-  (p_overview / p_signatures)  & theme(axis.text = element_blank(),axis.title = element_blank(), axis.ticks = element_blank(), plot.title = element_text(face = 'plain', size = 13))
+cols_c <- c('True_Infiltration' ='Infiltration Signature' ,'True_Inflammation' = 'Inflammation Signature')
+ps <- lapply(names(cols_c),\(i){
+    ggplot(obj@meta.data, mapping = aes(x = Ann_lvl_2, y = !!sym(i), fill = Ann_lvl_1H)) +
+        ggrastr::rasterise(geom_violin()) +
+        ggrastr::rasterise(geom_boxplot(width = 0.1, alpha = 0.5)) +
+        scale_fill_brewer(palette = 'Set2') +
+        x_axis_theme+ theme(axis.title = element_blank())+
+        ggtitle(cols_c[i])
+})
+
+violins <- wrap_plots(ps, ncol = 1) + plot_layout(guides = 'collect', axes = 'collect') 
+png(here('Glioma_Project/04_figs/presentation_figures/Violin_signatures.png'),units = 'in',res = 450, width = 15, height = 8)
+(p | violins) + plot_annotation(title = 'Microglia and monocyte environment',theme = theme(plot.title = element_text(size = 15, face = 'bold')))
+dev.off()
+```
+
+# Figure 2
+
+```{r computing ratios}
+# seurat_obj_path <- ifelse(!is.null(sub_dir), here(obj_path, sub_dir, paste0(Processed_name, ".qs2")), here(obj_path, paste0(Processed_name, ".qs2")))
+# seurat_obj <- qs_read(seurat_obj_path)
+# seurat_obj_clean <- subset(seurat_obj, subset = Ann_lvl_2 %in% c('Bad-quality','Hb+'), invert = TRUE)
+# seurat_obj_clean_P <- seurat_processing_manual(seurat_obj_clean, reduction_name = 'clean') # sample_name, 2000, 30, 3
+# qs_save(seurat_obj_clean_P,here('Glioma_Project/03_seurat_objects/Processed_Clean.qs2'))
+seurat_obj_clean_P <- qs_read(here("Glioma_Project/03_seurat_objects/Processed_Clean.qs2"))
+meta_df <- seurat_obj_clean_P@meta.data
+meta_df[, c(9:30, 38:40)] %>% distinct() -> new_df
+new_df %>% tibble::remove_rownames() -> distinct_meta
+check <- lapply(colnames(distinct_meta), \(c){
+    if (class(distinct_meta[[c]]) == "list") {
+        distinct_meta[[c]] <- as.character(distinct_meta[[c]])
+    } else {
+        distinct_meta[[c]]
+    }
+}) %>% as.data.frame()
+colnames(check) <- colnames(distinct_meta)
+check$sample_name <- gsub("_", "-", x = check$sample_name)
+metadf <- seurat_obj_clean_P@meta.data %>%
+    group_by(Ann_lvl_2, Ann_lvl_1H, sample_name) %>%
+    summarise(count = n())
+# Creating the totals.
+total_df <- metadf %>%
+    group_by(sample_name) %>%
+    summarise(sample_count = sum(count)) %>%
+    as.data.frame()
+total_df <- metadf %>%
+    filter(Ann_lvl_1H %in% c("T-CD8+", "T-CD4+", "T-other", "NK", "T-Prolif")) %>%
+    group_by(sample_name) %>%
+    summarise(Tcellcount = sum(count)) %>%
+    as.data.frame() %>%
+    right_join(total_df, by = "sample_name")
+total_df <- metadf %>%
+    filter(!Ann_lvl_1H %in% c("T-CD8+", "T-CD4+", "T-other", "NK", "T-Prolif")) %>%
+    group_by(sample_name) %>%
+    summarise(Mcellcount = sum(count)) %>%
+    as.data.frame() %>%
+    right_join(total_df, by = "sample_name")
+
+
+total_df <- metadf %>%
+    filter(Ann_lvl_1H %in% c("DCs")) %>%
+    group_by(sample_name) %>%
+    summarise(DC_count = sum(count)) %>%
+    as.data.frame() %>%
+    right_join(total_df, by = "sample_name")
+total_df <- metadf %>%
+    filter(Ann_lvl_1H %in% c("Microglia")) %>%
+    group_by(sample_name) %>%
+    summarise(Microglia = sum(count)) %>%
+    as.data.frame() %>%
+    right_join(total_df, by = "sample_name")
+total_df <- metadf %>%
+    filter(Ann_lvl_1H %in% c("Macrophage", "Monocyte")) %>%
+    group_by(sample_name) %>%
+    summarise(Macro_mono = sum(count)) %>%
+    as.data.frame() %>%
+    right_join(total_df, by = "sample_name")
+total_df[is.na(total_df)] <- 0
+total_df[["T_cells_Myeloid"]] <- (total_df[["Tcellcount"]] / total_df[["Mcellcount"]])
+total_df[["T_cells_Microglia"]] <- (total_df[["Tcellcount"]] / total_df[["Microglia"]])
+total_df[["T_cells_Macro_Mono"]] <- (total_df[["Tcellcount"]] / total_df[["Macro_mono"]])
+total_df[["T_cells_DC"]] <- (total_df[["Tcellcount"]] / total_df[["DC_count"]])
+total_df[["Microglia_Macro_mono"]] <- (total_df[["Microglia"]] / total_df[["Macro_mono"]])
+total_df[["DC_count_Microglia"]] <- (total_df[["DC_count"]] / total_df[["Microglia"]])
+total_df[["Tcell_prop"]] <- (total_df[["Tcellcount"]] / total_df[["sample_count"]])
+total_df[["Mcell_prop"]] <- (total_df[["Mcellcount"]] / total_df[["sample_count"]])
+total_df[["DC_prop"]] <- (total_df[["DC_count"]] / total_df[["sample_count"]])
+total_df[["Microglia_prop"]] <- (total_df[["Microglia"]] / total_df[["sample_count"]])
+total_df[["Macro_mono_prop"]] <- (total_df[["Macro_mono"]] / total_df[["sample_count"]])
+total_df$sample_name <- gsub("_", "-", x = total_df$sample_name)
+```
+
+
+
+```{r running the MLM}
+reduction_name <- "M_M"
+obj <- qs_read(here(paste0("Glioma_Project/03_seurat_objects/Processed_", reduction_name, ".qs2")))
+pseudo_seurat <- AggregateExpression(obj, assays = "RNA", return.seurat = T, group.by = c("sample_name"))
+pseudo_seurat <- NormalizeData(pseudo_seurat)
+
+df <- data.frame("source" = "Infiltration", "target" = gene_list[["Infiltrating"]], "mor" = 1)
+df <- rbind(df, data.frame("source" = "Infiltration", "target" = gene_list[["Resident"]], "mor" = -1))
+df <- rbind(df, data.frame("source" = "Inflammation", "target" = gene_list[["Microglial inflammatory"]], "mor" = 1))
+net <- rbind(df, data.frame("source" = "Inflammation", "target" = gene_list[["Anti_Inflam"]], "mor" = -1))
+res_mlm <- decoupleR::run_mlm(
+    mat = pseudo_seurat[["RNA"]]$data,
+    network = net,
+    .source = "source",
+    .target = "target",
+    center = FALSE
+)
+res_mlm <- res_mlm |> left_join(check, by = join_by(condition == sample_name)) # Dataframe containing metadata of object
+res_mlm_final <- res_mlm |> left_join(total_df, by = join_by(condition == sample_name)) # Dataframe containing the proportions and counts
+
+infiltration_order <- res_mlm_final %>%
+    filter(source == "Infiltration") %>%
+    arrange(desc(score)) %>%
+    pull(condition)
+Inflammation_order <- res_mlm_final %>%
+    filter(source == "Inflammation") %>%
+    arrange(desc(score)) %>%
+    pull(condition)
+```
+
+
+```{r determining orderings }
+reduction_name <- "Clean"
+obj <- qs_read(here(paste0("Glioma_Project/03_seurat_objects/Processed_", reduction_name, ".qs2")))
+sample_count_df <- obj@meta.data %>%
+    group_by(sample_name) %>%
+    summarise(sample_count = n())
+col <- c("Ann_lvl_1H" = "Microglia", 'Ann_lvl_2' = 'Tregs')
+order_list <- lapply(names(col), \(i){
+    count_table <- obj@meta.data %>%
+        group_by(!!sym(i), sample_name) %>%
+        summarise(count = n())
+    freq_table <- count_table %>%
+        left_join(sample_count_df) %>%
+        group_by(sample_name) %>%
+        mutate(prop = count / sample_count * 100) %>%
+        ungroup() %>%
+        complete(sample_name, !!sym(i), fill = list(prop = 0)) %>%
+        ungroup()
+    order <- freq_table %>%
+        filter(!!sym(i) == col[i]) %>%
+        arrange(desc(prop)) %>% # highest first
+        pull(sample_name)
+})
+names(order_list) <- col
+col <- c(col, "Inflammation_score" = "Inflammation_score", "Infiltration_score" = "Infiltration_score")
+order_list[[col["Inflammation_score"]]] <- order_list[[1]][match(Inflammation_order, gsub("_", "-", x = order_list[[1]]))]
+order_list[[col["Infiltration_score"]]] <- order_list[[2]][match(infiltration_order, gsub("_", "-", x = order_list[[2]]))]
+```
+
+```{r}
+
+```
