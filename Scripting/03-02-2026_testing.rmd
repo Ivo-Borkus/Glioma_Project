@@ -801,7 +801,6 @@ df_list <- lapply(columns_to_check[-c(1, 5, 6, 10)], \(column){
         rstatix::cor_test(value, score, method = "pearson")
 })
 
-df_list
 do.call(rbind, df_list) %>%
     as.data.frame() %>%
     filter(abs(cor) > 0.5) %>%

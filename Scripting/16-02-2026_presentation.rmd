@@ -153,6 +153,13 @@ total_df <- metadf %>%
     summarise(Macro_mono = sum(count)) %>%
     as.data.frame() %>%
     right_join(total_df, by = "sample_name")
+
+total_df <- metadf %>%
+    filter(Ann_lvl_2 %in% c("Tregs")) %>%
+    group_by(sample_name) %>%
+    summarise(Treg_count = sum(count)) %>%
+    as.data.frame() %>%
+    right_join(total_df, by = "sample_name")
 total_df[is.na(total_df)] <- 0
 total_df[["T_cells_Myeloid"]] <- (total_df[["Tcellcount"]] / total_df[["Mcellcount"]])
 total_df[["T_cells_Microglia"]] <- (total_df[["Tcellcount"]] / total_df[["Microglia"]])
@@ -165,6 +172,7 @@ total_df[["Mcell_prop"]] <- (total_df[["Mcellcount"]] / total_df[["sample_count"
 total_df[["DC_prop"]] <- (total_df[["DC_count"]] / total_df[["sample_count"]])
 total_df[["Microglia_prop"]] <- (total_df[["Microglia"]] / total_df[["sample_count"]])
 total_df[["Macro_mono_prop"]] <- (total_df[["Macro_mono"]] / total_df[["sample_count"]])
+total_df[["Treg_prop"]] <- (total_df[["Treg_count"]] / total_df[["sample_count"]])
 total_df$sample_name <- gsub("_", "-", x = total_df$sample_name)
 ```
 
@@ -229,6 +237,89 @@ col <- c(col, "Inflammation_score" = "Inflammation_score", "Infiltration_score" 
 order_list[[col["Inflammation_score"]]] <- order_list[[1]][match(Inflammation_order, gsub("_", "-", x = order_list[[1]]))]
 order_list[[col["Infiltration_score"]]] <- order_list[[2]][match(infiltration_order, gsub("_", "-", x = order_list[[2]]))]
 ```
+
+```{r}
+columns_to_check_continous <- unlist(lapply(colnames(res_mlm_final)[7:48], \(col){
+    vec <- res_mlm_final[[col]]
+    if (is.numeric(vec) && length(unique(vec) > 1)) {
+        print(col)
+    }
+}))[-c(1:6)]
+
+df_list <- lapply(c('IDH_status','tumour_abbreviated'), \(column){
+    print(column)
+    data <- res_mlm_final
+    data$condition <- data[[column]]
+    data %>%
+        pivot_longer(
+            cols = columns_to_check_continous,
+            names_to = "variable",
+            values_to = "value"
+        ) %>% filter(value < 100000) %>% 
+        group_by(variable, source, condition) %>%
+        rstatix::cor_test(value, score, method = "pearson")
+})
+
+result_df <- do.call(rbind, df_list)
+result_df %>%
+    filter(abs(cor) > 0.4) %>%
+    filter(p < 0.05) %>% group_by(variable) %>% summarise(count = n()) %>% arrange(desc(count)) %>% pull(variable,count)
+    gt::gt()
+```
+
+```{r presenting}
+
+plot <- res_mlm_final %>% ggpubr::ggscatter(
+        x = 'Microglia_Macro_mono', y = "score",
+        add = "reg.line",
+        add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line    conf.int = TRUE, # Add confidence interval
+        cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+        conf.int = TRUE, # Add confidence interval
+        cor.coeff.args = list(method = "pearson")
+    ) + x_axis_theme
+plot1 <- ggpubr::facet(plot,
+    facet.by = c("source", "tumour_abbreviated"), scales = "free_y", short.panel.labs = TRUE, # Allow long labels in panels
+    panel.labs.background = list(fill = "grey", color = "grey"), panel.labs.font = list(size = 13, color = "black")
+)
+plot1
+
+plot <- res_mlm_final %>% ggpubr::ggscatter(
+        x = 'Macro_mono_prop', y = "score",
+        add = "reg.line",
+        add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line    conf.int = TRUE, # Add confidence interval
+        cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+        conf.int = TRUE, # Add confidence interval
+        cor.coeff.args = list(method = "pearson")
+    ) + x_axis_theme
+plot2 <- ggpubr::facet(plot,
+        facet.by = c("source", "tumour_abbreviated"), scales = "free", short.panel.labs = TRUE, # Allow long labels in panels
+        panel.labs.background = list(fill = "darkgrey", color = "black"), panel.labs.font = list(size = 15, color = "black")
+        # panel.labs.background = list(fill = "skyblue", color = "black")
+    )
+plot2
+plot <- res_mlm_final %>% ggpubr::ggscatter(
+        x = 'Microglia_prop', y = "score",
+        add = "reg.line",
+        add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line    conf.int = TRUE, # Add confidence interval
+        cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+        conf.int = TRUE, # Add confidence interval
+        cor.coeff.args = list(method = "pearson")
+    ) + x_axis_theme
+plot3 <- ggpubr::facet(plot,
+    facet.by = c("source", "tumour_abbreviated"), scales = "free", short.panel.labs = TRUE, # Allow long labels in panels
+    panel.labs.background = list(fill = "darkgrey", color = "black"), panel.labs.font = list(size = 15, color = "black")
+    # panel.labs.background = list(fill = "skyblue", color = "black")
+)
+plot3 <- plot3 + theme( axis.title = element_text(face = 'bold',size = 12))
+plot3 + plot_annotation(title = 'Microglia presence determines environment functionality', theme = theme(plot.title = element_text(face = 'bold', size = 15) ))
+
+plot1 + plot2 + plot3
+
+
+
+
+```
+
 
 ```{r}
 
